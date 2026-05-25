@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'kay2tunnel',
+      name: 'stan-cli',
       script: './server/index.js',
       watch: false,
       autorestart: true,
@@ -9,9 +9,9 @@ module.exports = {
       env: {
         NODE_ENV: 'production'
       },
-      error_file: '~/.pm2/logs/kay2tunnel-error.log',
-      out_file: '~/.pm2/logs/kay2tunnel-out.log',
-      log_file: '~/.pm2/logs/kay2tunnel-combined.log'
+      error_file: '~/.pm2/logs/stan-cli-error.log',
+      out_file: '~/.pm2/logs/stan-cli-out.log',
+      log_file: '~/.pm2/logs/stan-cli-combined.log'
     }
   ]
 };

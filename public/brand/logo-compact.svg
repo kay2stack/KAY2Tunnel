@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 32" fill="none">
+  <defs>
+    <linearGradient id="cli-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7C5CFF"/>
+      <stop offset="100%" stop-color="#B18CFF"/>
+    </linearGradient>
+    <linearGradient id="box-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7C5CFF"/>
+      <stop offset="100%" stop-color="#B18CFF"/>
+    </linearGradient>
+  </defs>
+  <rect x="1" y="2" width="26" height="20" rx="4" fill="#1A1330" stroke="url(#box-grad)" stroke-width="1.5"/>
+  <text x="5" y="17" font-family="JetBrains Mono, monospace" font-size="10" fill="url(#cli-grad)">&#62;_</text>
+  <text x="33" y="21" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="700" fill="#FFFFFF">Stan</text>
+  <text x="75" y="21" font-family="Inter, system-ui, sans-serif" font-size="16" font-weight="700" fill="url(#cli-grad)">CLI</text>
+</svg>

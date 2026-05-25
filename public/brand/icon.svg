@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="box-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7C5CFF"/>
+      <stop offset="100%" stop-color="#B18CFF"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1A1330"/>
+      <stop offset="100%" stop-color="#0D0D12"/>
+    </linearGradient>
+  </defs>
+  <!-- App background -->
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+  <!-- Terminal block (centred, lower half) -->
+  <rect x="96" y="280" width="320" height="160" rx="24" fill="#1A1330" stroke="url(#box-grad)" stroke-width="6"/>
+  <!-- Prompt -->
+  <text x="148" y="385" font-family="JetBrains Mono, monospace" font-size="72" font-weight="400" fill="url(#box-grad)">&#62;_</text>
+  <!-- Stan placeholder cat shape (geometric stand-in for real artwork) -->
+  <!-- Head -->
+  <ellipse cx="256" cy="190" rx="90" ry="85" fill="#111"/>
+  <!-- Ears -->
+  <polygon points="180,130 160,80 220,120" fill="#111"/>
+  <polygon points="332,130 352,80 292,120" fill="#111"/>
+  <!-- Inner ears -->
+  <polygon points="185,125 170,90 215,115" fill="#2A1A40" opacity="0.6"/>
+  <polygon points="327,125 342,90 297,115" fill="#2A1A40" opacity="0.6"/>
+  <!-- Eyes -->
+  <ellipse cx="220" cy="195" rx="22" ry="24" fill="#B8C840"/>
+  <ellipse cx="292" cy="195" rx="22" ry="24" fill="#B8C840"/>
+  <ellipse cx="220" cy="197" rx="14" ry="18" fill="#0a0a0a"/>
+  <ellipse cx="292" cy="197" rx="14" ry="18" fill="#0a0a0a"/>
+  <!-- Eye shine -->
+  <ellipse cx="226" cy="189" rx="5" ry="5" fill="white" opacity="0.9"/>
+  <ellipse cx="298" cy="189" rx="5" ry="5" fill="white" opacity="0.9"/>
+  <!-- Nose -->
+  <ellipse cx="256" cy="228" rx="7" ry="5" fill="#B18CFF" opacity="0.8"/>
+  <!-- Paws on terminal block -->
+  <ellipse cx="185" cy="282" rx="28" ry="18" fill="#111"/>
+  <ellipse cx="327" cy="282" rx="28" ry="18" fill="#111"/>
+</svg>
