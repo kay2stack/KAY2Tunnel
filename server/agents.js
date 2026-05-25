@@ -45,13 +45,15 @@ const AGENT_DEFS = [
   },
 ];
 
+const _installCache = {};
 function isInstalled(cmd) {
   if (!cmd) return false;
+  if (cmd in _installCache) return _installCache[cmd];
   try {
-    // check both PATH and common npm-global locations
-    execSync(`which ${cmd} 2>/dev/null || ls ~/.npm-global/bin/${cmd} 2>/dev/null || ls ~/.nvm/versions/node/*/bin/${cmd} 2>/dev/null`, { shell: '/bin/bash' });
-    return true;
-  } catch { return false; }
+    execSync(`which ${cmd} 2>/dev/null || ls ~/.npm-global/bin/${cmd} 2>/dev/null || ls ~/.nvm/versions/node/*/bin/${cmd} 2>/dev/null`, { shell: '/bin/bash', timeout: 2000 });
+    _installCache[cmd] = true;
+  } catch { _installCache[cmd] = false; }
+  return _installCache[cmd];
 }
 
 function agentSession(agentId) {

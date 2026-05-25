@@ -9,7 +9,7 @@ const upload = multer({ dest: '/tmp/stan-cli-uploads/' });
 const MAX_INLINE = 5 * 1024 * 1024; // 5 MB
 
 function jail(reqPath) {
-  const resolved = path.resolve(ROOT_DIR, reqPath.replace(/^\//, ''));
+  const resolved = path.resolve(ROOT_DIR, reqPath || '');
   if (!resolved.startsWith(ROOT_DIR + path.sep) && resolved !== ROOT_DIR) {
     return null;
   }
