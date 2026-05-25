@@ -32,4 +32,4 @@ server.on('upgrade', (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => handleWs(ws, req));
 });
 
-server.listen(PORT, HOST, () => console.log(`Stan CLI listening on http://${HOST}:${PORT}`));
+server.listen(PORT, HOST, () => console.log(`Stan CLI v1.0.0 — http://${HOST}:${PORT}`));

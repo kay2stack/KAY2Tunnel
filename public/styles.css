@@ -525,6 +525,92 @@ html, body {
 .ctx-item:active { background: var(--bg-secondary); }
 .ctx-item.danger { color: var(--red); }
 
+/* ── File browser ──────────────────────────────────── */
+.breadcrumb {
+  display: flex; align-items: center; gap: 2px;
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--bg-card); border-bottom: 1px solid var(--border);
+  overflow-x: auto; flex-shrink: 0;
+  scrollbar-width: none;
+}
+.breadcrumb::-webkit-scrollbar { display: none; }
+.crumb-btn {
+  background: none; border: none; cursor: pointer;
+  font-size: 13px; font-weight: 500; color: var(--text-secondary);
+  padding: 3px 5px; border-radius: var(--r-sm);
+  white-space: nowrap; font-family: var(--font-ui);
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+.crumb-btn:active { background: var(--accent-dim); color: var(--accent); }
+.crumb-btn.active { color: var(--text-primary); font-weight: 600; }
+.crumb-sep { font-size: 12px; color: var(--text-dim); user-select: none; padding: 0 1px; }
+
+.pin-row {
+  display: flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  overflow-x: auto; flex-shrink: 0; scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+.pin-row::-webkit-scrollbar { display: none; }
+.pin-chip {
+  flex-shrink: 0; padding: 5px 12px; border-radius: var(--r-pill);
+  background: var(--accent-dim); color: var(--accent);
+  border: 1px solid var(--accent-border);
+  font-size: 12px; font-weight: 600; cursor: pointer; font-family: var(--font-ui);
+  transition: all var(--dur-fast); white-space: nowrap;
+}
+.pin-chip:active { background: var(--accent); color: #fff; }
+
+.file-row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 10px var(--sp-4); cursor: pointer;
+  background: var(--bg-card); border-bottom: 1px solid var(--border);
+  min-height: 60px;
+  transition: background var(--dur-fast);
+}
+.file-row:last-child { border-bottom: none; }
+.file-row:active { background: var(--bg-secondary); }
+.file-row-icon {
+  width: 36px; height: 36px; border-radius: var(--r-md);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.dir-icon {
+  background: var(--blue-bg); color: var(--blue);
+}
+.file-icon-wrap {
+  background: var(--bg-secondary); color: var(--text-dim);
+}
+.file-row-info {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;
+}
+.file-row-name {
+  font-size: 15px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.file-row-path {
+  font-size: 11px; color: var(--text-dim); font-family: var(--font-mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.git-badge {
+  display: inline-block; padding: 1px 7px; border-radius: var(--r-pill);
+  background: var(--accent-dim); color: var(--accent-soft);
+  font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+  margin-top: 2px; font-family: var(--font-mono); align-self: flex-start;
+}
+.file-row-action {
+  flex-shrink: 0; padding: 6px 10px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--r-sm); color: var(--text-secondary);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+  font-family: var(--font-ui); text-decoration: none;
+  display: flex; align-items: center; gap: 4px;
+  transition: all var(--dur-fast);
+}
+.cd-btn { color: var(--blue); border-color: rgba(59,130,246,0.25); background: var(--blue-bg); }
+.edit-btn { color: var(--accent); border-color: var(--accent-border); background: var(--accent-dim); }
+.dl-btn  { color: var(--text-secondary); }
+.file-row-action:active { opacity: 0.7; }
+
 /* ── Settings tab ──────────────────────────────────── */
 .settings-section { margin-bottom: var(--sp-2); }
 .settings-section-title {

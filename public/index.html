@@ -17,11 +17,18 @@
   <link rel="stylesheet" href="brand/tokens.css">
   <link rel="stylesheet" href="vendor/xterm.css">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    window.onerror = function(m,s,l){var b=document.getElementById('_err-banner');if(b){b.textContent=(s||'').split('/').pop()+':'+l+' — '+m;b.style.display='block';}};
+    window.onunhandledrejection = function(e){var b=document.getElementById('_err-banner');if(b){b.textContent='Unhandled: '+(e.reason&&e.reason.message||e.reason);b.style.display='block';}};
+  </script>
 </head>
 <body>
 
+<!-- Error banner — hidden until JS catches an uncaught exception -->
+<div id="_err-banner" style="display:none;position:fixed;top:0;left:0;right:0;z-index:9999;background:#EF4444;color:#fff;font-size:12px;font-family:monospace;padding:8px 12px;word-break:break-all"></div>
+
 <!-- ── Auth screen ──────────────────────────────────── -->
-<div id="auth-screen" class="hidden">
+<div id="auth-screen">
   <div class="auth-hero">
     <img class="auth-mascot" src="icons/icon-512.png" alt="Stan">
     <div class="auth-title">Stan <span>CLI</span></div>

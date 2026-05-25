@@ -24,16 +24,16 @@ const App = (() => {
   }
 
   function showTab(name) {
-    if (_activeTab === 'agents' && window.Agents && name !== 'agents') Agents.deactivate?.();
+    if (_activeTab === 'agents' && typeof Agents !== 'undefined' && name !== 'agents') Agents.deactivate?.();
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('tab-' + name).classList.remove('hidden');
     const btn = document.querySelector(`.tab-btn[data-tab="${name}"]`);
     if (btn) btn.classList.add('active');
     _activeTab = name;
-    if (name === 'term' && window.Term) { Term.init(); Term.focus(); }
-    if (name === 'projects' && window.Projects) Projects.activate();
-    if (name === 'agents'   && window.Agents)   Agents.activate();
+    if (name === 'term') { Term.init(); Term.focus(); }
+    if (name === 'projects') Projects.activate();
+    if (name === 'agents') Agents.activate();
     if (name === 'home')    loadHomeStats();
     if (name === 'settings') loadSettings();
   }
@@ -84,14 +84,26 @@ const App = (() => {
 
     const saved = localStorage.getItem('stan_token');
     if (saved) { _token = saved; launch(); }
-    else { document.getElementById('auth-screen').classList.remove('hidden'); }
+    // else: auth-screen is already visible (no hidden class in HTML)
 
     document.getElementById('token-submit').addEventListener('click', tryAuth);
     document.getElementById('token-input').addEventListener('keydown', e => {
       if (e.key === 'Enter') tryAuth();
     });
 
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(reg => {
+        reg.addEventListener('updatefound', () => {
+          const nw = reg.installing;
+          nw.addEventListener('statechange', () => {
+            // New SW activated + took control → reload to get fresh JS/CSS
+            if (nw.state === 'activated' && navigator.serviceWorker.controller) {
+              window.location.reload();
+            }
+          });
+        });
+      }).catch(() => {});
+    }
   }
 
   async function tryAuth() {

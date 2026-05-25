@@ -1,15 +1,25 @@
 {
   "name": "stan-cli",
-  "version": "0.1.0",
-  "description": "Your terminal companion.",
+  "version": "1.0.0",
+  "description": "Self-hosted Pi remote panel — terminal, files, AI. No relay, no cloud.",
   "main": "server/index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
-    "start": "pm2 start ecosystem.config.js"
+    "dev":     "node server/index.js",
+    "start":   "pm2 start ecosystem.config.js",
+    "stop":    "pm2 stop stan-cli",
+    "restart": "pm2 restart stan-cli",
+    "logs":    "pm2 logs stan-cli",
+    "status":  "pm2 status",
+    "tunnel":  "pm2 start ecosystem.config.js --only stan-cli-tunnel"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kay2stack/KAY2Tunnel.git"
   },
   "dependencies": {
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0",
-    "@xterm/xterm": "^5.5.0",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "multer": "^2.1.1",

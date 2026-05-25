@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+
+# Environment — never commit secrets
+.env
+
+# Logs
+*.log
+logs/
+
+# PM2 runtime
+.pm2/
+
+# Build artifacts / uploads
+/tmp/
+public/vendor/*.map
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Uploads temp
+/tmp/stan-cli-uploads/
