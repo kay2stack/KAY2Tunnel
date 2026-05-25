@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'stan-cli-v4';
+const CACHE_VERSION = 'stan-cli-v5';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
