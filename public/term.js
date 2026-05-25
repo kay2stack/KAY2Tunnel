@@ -1,0 +1,1 @@
+// xterm.js wiring (stub)

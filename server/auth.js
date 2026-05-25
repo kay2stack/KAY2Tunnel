@@ -1,0 +1,1 @@
+// bearer-token middleware (stub)

@@ -1,0 +1,14 @@
+{
+  "name": "kay2tunnel",
+  "version": "0.1.0",
+  "description": "Self-hosted Tailscale tunnel: terminal, files, & local AI on the Pi.",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "pm2 start ecosystem.config.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.15.1",
+    "node-pty": "^1.0.0"
+  }
+}

@@ -1,0 +1,1 @@
+// File panel/editor (stub)
