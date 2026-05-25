@@ -125,6 +125,15 @@
         <span class="top-bar-title">Agents</span>
         <button class="top-bar-action" id="agents-refresh-btn">Refresh</button>
       </div>
+      <div id="sys-bar">
+        <div class="sys-stat"><span class="sys-label">CPU</span><span class="sys-val" id="sys-cpu">—</span></div>
+        <div class="sys-sep">·</div>
+        <div class="sys-stat"><span class="sys-label">MEM</span><span class="sys-val" id="sys-mem">—</span></div>
+        <div class="sys-sep">·</div>
+        <div class="sys-stat"><span class="sys-label">TEMP</span><span class="sys-val" id="sys-temp">—</span></div>
+        <div class="sys-sep">·</div>
+        <div class="sys-stat"><span class="sys-label">LOAD</span><span class="sys-val" id="sys-load">—</span></div>
+      </div>
       <div class="scroll-list" id="agents-list">
         <div style="color:var(--text-dim);font-size:14px;text-align:center;padding:40px 0">Loading…</div>
       </div>
@@ -139,6 +148,26 @@
       <div class="scroll-list" id="projects-list">
         <div style="color:var(--text-dim);font-size:14px;text-align:center;padding:40px 0">Loading…</div>
       </div>
+    </div>
+
+    <!-- Pi Remote tab -->
+    <div id="tab-pi" class="tab-panel hidden">
+      <div class="top-bar">
+        <span class="top-bar-title">Pi Remote</span>
+        <button class="top-bar-action" id="pi-refresh-btn">Refresh</button>
+      </div>
+      <div class="scroll-list" id="pi-content">
+        <div style="color:var(--text-dim);font-size:14px;text-align:center;padding:40px 0">Loading…</div>
+      </div>
+    </div>
+
+    <!-- Browser tab -->
+    <div id="tab-browser" class="tab-panel hidden">
+      <div class="top-bar">
+        <span class="status-dot offline" id="browser-status-dot"></span>
+        <span class="top-bar-title">Browser</span>
+      </div>
+      <div id="browser-panel"></div>
     </div>
 
     <!-- Settings tab -->
@@ -209,12 +238,29 @@
       </svg>
       Projects
     </button>
+    <button class="tab-btn" data-tab="pi">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="6" width="16" height="12" rx="2"/>
+        <circle cx="8" cy="12" r="1.5" fill="currentColor"/>
+        <line x1="12" y1="9" x2="12" y2="15"/>
+        <line x1="15" y1="10" x2="15" y2="14"/>
+        <line x1="18" y1="8" x2="18" y2="16"/>
+      </svg>
+      Pi
+    </button>
+    <button class="tab-btn" data-tab="browser">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"/>
+        <path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/>
+      </svg>
+      Browser
+    </button>
     <button class="tab-btn" data-tab="settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
         <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
       </svg>
-      Settings
+      More
     </button>
   </nav>
 </div>
@@ -244,5 +290,8 @@
 <script src="term.js"></script>
 <script src="projects.js"></script>
 <script src="agents.js"></script>
+<script src="diff.js"></script>
+<script src="pi.js"></script>
+<script src="browser.js"></script>
 </body>
 </html>

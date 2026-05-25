@@ -13,6 +13,7 @@ class Session {
     this.id = crypto.randomUUID();
     this.name = name;
     this.cmd = cmd;
+    this.cwd = cwd;
     this.clients = new Set();
     this.scrollback = Buffer.alloc(0);
     this.lastActive = Date.now();
@@ -127,6 +128,7 @@ function listSessions() {
     id: s.id,
     name: s.name,
     cmd: s.cmd,
+    cwd: s.cwd,
     clients: s.clients.size,
     lastActive: s.lastActive,
     createdAt: s.createdAt,

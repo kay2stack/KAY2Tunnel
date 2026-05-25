@@ -24,17 +24,23 @@ const App = (() => {
   }
 
   function showTab(name) {
-    if (_activeTab === 'agents' && typeof Agents !== 'undefined' && name !== 'agents') Agents.deactivate?.();
+    if (_activeTab === 'agents'  && typeof Agents  !== 'undefined' && name !== 'agents')  Agents.deactivate?.();
+    if (_activeTab === 'pi'      && typeof Pi       !== 'undefined' && name !== 'pi')      Pi.deactivate?.();
+    if (_activeTab === 'browser' && typeof Browser  !== 'undefined' && name !== 'browser') Browser.deactivate?.();
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-    document.getElementById('tab-' + name).classList.remove('hidden');
+    const panel = document.getElementById('tab-' + name);
+    if (!panel) return;
+    panel.classList.remove('hidden');
     const btn = document.querySelector(`.tab-btn[data-tab="${name}"]`);
     if (btn) btn.classList.add('active');
     _activeTab = name;
-    if (name === 'term') { Term.init(); Term.focus(); }
+    if (name === 'term')     { Term.init(); Term.focus(); }
     if (name === 'projects') Projects.activate();
-    if (name === 'agents') Agents.activate();
-    if (name === 'home')    loadHomeStats();
+    if (name === 'agents')   Agents.activate();
+    if (name === 'pi')       Pi?.activate();
+    if (name === 'browser')  Browser?.activate();
+    if (name === 'home')     loadHomeStats();
     if (name === 'settings') loadSettings();
   }
 

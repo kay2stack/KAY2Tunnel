@@ -14,7 +14,7 @@ const Projects = (() => {
 
   let _showHidden = false;
 
-  const GIT_CACHE = {}; // path → branch string (cached per session)
+  const GIT_CACHE = {}; // path → { branch, dirty } (cached per session)
 
   function init() {}
 
@@ -161,7 +161,7 @@ const Projects = (() => {
     `;
 
     row.addEventListener('click', e => {
-      if (e.target.closest('.cd-btn')) return;
+      if (e.target.closest('.cd-btn') || e.target.closest('.review-btn')) return;
       navigate(fullPath);
     });
 
@@ -211,26 +211,127 @@ const Projects = (() => {
   }
 
   // ── Git badge ────────────────────────────────────
-  async function maybeBadgeGit(row, path) {
-    if (path in GIT_CACHE) {
-      if (GIT_CACHE[path]) appendGitBadge(row, GIT_CACHE[path]);
+  async function maybeBadgeGit(row, dirPath) {
+    if (dirPath in GIT_CACHE) {
+      const c = GIT_CACHE[dirPath];
+      if (c && c.branch) appendGitBadge(row, c.branch, c.dirty, dirPath);
       return;
     }
     try {
       const r = await App.apiFetch('/api/projects');
       const projects = await r.json();
-      projects.forEach(p => { GIT_CACHE[p.path] = p.git.branch || ''; });
+      projects.forEach(p => { GIT_CACHE[p.path] = { branch: p.git.branch || '', dirty: p.git.dirty }; });
     } catch { return; }
-    if (GIT_CACHE[path]) appendGitBadge(row, GIT_CACHE[path]);
+    const c = GIT_CACHE[dirPath];
+    if (c && c.branch) appendGitBadge(row, c.branch, c.dirty, dirPath);
   }
 
-  function appendGitBadge(row, branch) {
+  function appendGitBadge(row, branch, dirty, dirPath) {
     const info = row.querySelector('.file-row-info');
     if (!info || info.querySelector('.git-badge')) return;
     const badge = document.createElement('span');
     badge.className = 'git-badge';
     badge.textContent = '⎇ ' + branch;
     info.appendChild(badge);
+
+    if (dirty) {
+      const dirtyBadge = document.createElement('span');
+      dirtyBadge.className = 'git-dirty-badge';
+      dirtyBadge.textContent = '● changes';
+      info.appendChild(dirtyBadge);
+
+      const reviewBtn = document.createElement('button');
+      reviewBtn.className = 'file-row-action review-btn';
+      reviewBtn.textContent = 'Review';
+      reviewBtn.title = 'Review uncommitted changes';
+      reviewBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        if (typeof Diff !== 'undefined') Diff.show(dirPath);
+      });
+      const cdBtn = row.querySelector('.cd-btn');
+      if (cdBtn) row.insertBefore(reviewBtn, cdBtn);
+      else row.appendChild(reviewBtn);
+    }
+
+    // Quick actions button (⋮) for git repos
+    const moreBtn = document.createElement('button');
+    moreBtn.className = 'file-row-action more-btn';
+    moreBtn.textContent = '⋮';
+    moreBtn.title = 'Quick actions';
+    moreBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      showRepoActions(dirPath, branch, dirty, e);
+    });
+    row.appendChild(moreBtn);
+  }
+
+  function showRepoActions(dirPath, branch, dirty, triggerEvent) {
+    const existing = document.getElementById('repo-action-sheet');
+    if (existing) existing.remove();
+
+    const name = dirPath.split('/').pop();
+    const sheet = document.createElement('div');
+    sheet.id = 'repo-action-sheet';
+    sheet.style.cssText = `
+      position:fixed;inset:0;z-index:60;background:rgba(0,0,0,0.55);
+      backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;
+    `;
+
+    const ACTIONS = [
+      { label: '> Open Terminal', fn: () => openInTerminal(dirPath) },
+      { label: '↓ Git Pull', fn: () => { App.showTab('term'); Term.paste(`cd ${JSON.stringify(dirPath)} && git pull\n`); } },
+      { label: '◉ Launch Claude Code', fn: () => { App.showTab('agents'); Agents.launchInProject('claude-code', dirPath, name); } },
+      { label: '⊙ Launch Codex', fn: () => { App.showTab('agents'); Agents.launchInProject('codex', dirPath, name); } },
+      { label: '≡ Run Tests', fn: () => { App.showTab('term'); Term.paste(`cd ${JSON.stringify(dirPath)} && npm test\n`); } },
+      { label: '⎇ Branch: ' + branch, fn: () => { App.showTab('term'); Term.paste(`cd ${JSON.stringify(dirPath)} && git branch\n`); } },
+    ];
+    if (dirty) {
+      ACTIONS.splice(1, 0, { label: '● Review Changes', fn: () => { if (typeof Diff !== 'undefined') Diff.show(dirPath); } });
+    }
+    ACTIONS.push({ label: '✕ Cancel', cancel: true, fn: () => {} });
+
+    sheet.innerHTML = `
+      <div style="background:var(--bg-card);border-radius:var(--r-xl) var(--r-xl) 0 0;
+        border:1px solid var(--border);width:100%;max-width:600px;overflow:hidden">
+        <div style="padding:var(--sp-4) var(--sp-5);border-bottom:1px solid var(--border);
+          display:flex;align-items:center;gap:8px">
+          <div class="dir-icon file-row-icon" style="width:28px;height:28px;flex-shrink:0">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h3.17a2 2 0 011.41.59L11 7h9a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
+          </div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:15px;font-weight:600;color:var(--text-primary)">${esc(name)}</div>
+            <div style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono)">${esc(dirPath)}</div>
+          </div>
+        </div>
+        <div id="repo-actions-list"></div>
+        <div style="height:calc(var(--safe-bottom) + 4px)"></div>
+      </div>
+    `;
+
+    sheet.addEventListener('click', e => { if (e.target === sheet) sheet.remove(); });
+
+    const list = sheet.querySelector('#repo-actions-list');
+    ACTIONS.forEach(a => {
+      const btn = document.createElement('button');
+      btn.style.cssText = `
+        width:100%;padding:15px var(--sp-5);text-align:left;
+        font-family:var(--font-ui);font-size:15px;
+        background:none;border:none;border-bottom:1px solid var(--border);
+        color:${a.cancel ? 'var(--text-dim)' : 'var(--text-primary)'};cursor:pointer;
+      `;
+      btn.textContent = a.label;
+      btn.addEventListener('click', () => { sheet.remove(); a.fn(); });
+      list.appendChild(btn);
+    });
+
+    document.body.appendChild(sheet);
+  }
+
+  // Called by diff.js after a commit/discard to refresh dirty state
+  function _refreshDirty() {
+    // Clear cache so next navigate re-fetches
+    Object.keys(GIT_CACHE).forEach(k => delete GIT_CACHE[k]);
+    navigate(_currentPath);
   }
 
   // ── Open in terminal ─────────────────────────────
@@ -320,5 +421,5 @@ const Projects = (() => {
     return `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>`;
   }
 
-  return { init, activate };
+  return { init, activate, _refreshDirty };
 })();

@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'stan-cli-v8';
+const CACHE_VERSION = 'stan-cli-v10';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -7,6 +7,9 @@ const SHELL_ASSETS = [
   '/term.js',
   '/projects.js',
   '/agents.js',
+  '/diff.js',
+  '/pi.js',
+  '/browser.js',
   '/files.js',
   '/ai.js',
   '/manifest.webmanifest',

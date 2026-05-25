@@ -9,6 +9,10 @@ const filesRouter = require('./files');
 const aiRouter = require('./ai');
 const agentsRouter = require('./agents');
 const projectsRouter = require('./projects');
+const diffRouter = require('./diff');
+const piRouter = require('./pi');
+const browserRouter = require('./browser');
+const system = require('./system');
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +24,10 @@ app.use('/api/files', filesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/agents', agentsRouter);
 app.use('/api/projects', projectsRouter);
+app.use('/api/diff', diffRouter);
+app.use('/api/pi', piRouter);
+app.use('/api/browser', browserRouter);
+app.get('/api/system', (req, res) => res.json({ cpu: system.cpu(), mem: system.mem(), load: system.load(), temp: system.temp(), uptime: system.uptime() }));
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));

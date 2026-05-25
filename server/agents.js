@@ -67,7 +67,7 @@ router.get('/', (req, res) => {
     return {
       ...a,
       installed: a.cmd ? isInstalled(a.cmd) : true,
-      session: running ? { id: running.id, lastActive: running.lastActive, clients: running.clients } : null,
+      session: running ? { id: running.id, cwd: running.cwd, lastActive: running.lastActive, createdAt: running.createdAt, clients: running.clients } : null,
     };
   });
   res.json(result);

@@ -20,6 +20,19 @@ const Term = (() => {
     { label: ':', send: ':' },
   ];
 
+  const DEFAULT_MACROS = [
+    { label: 'git pull', cmd: 'git pull\n' },
+    { label: 'git status', cmd: 'git status\n' },
+    { label: 'pm2 status', cmd: 'pm2 status\n' },
+    { label: 'npm i', cmd: 'npm install\n' },
+    { label: 'claude', cmd: 'claude\n' },
+  ];
+
+  function getMacros() {
+    try { return JSON.parse(localStorage.getItem('stan_macros') || 'null') || DEFAULT_MACROS; }
+    catch { return DEFAULT_MACROS; }
+  }
+
   let term, fitAddon, ws, wsOpen = false;
   let sessionId = localStorage.getItem('stan_session');
   let sessionName = null;
@@ -155,6 +168,21 @@ const Term = (() => {
         if (altSticky) { data = '\x1b' + data; clearSticky('Alt'); }
         sendMsg({ type: 'input', data }); term.focus();
       });
+      bar.appendChild(btn);
+    });
+
+    // Separator
+    const sep = document.createElement('div');
+    sep.style.cssText = 'width:1px;height:20px;background:var(--border);flex-shrink:0;margin:0 4px;align-self:center';
+    bar.appendChild(sep);
+
+    // Macro buttons
+    getMacros().forEach(m => {
+      const btn = document.createElement('button');
+      btn.className = 'key-btn macro-btn';
+      btn.textContent = m.label;
+      btn.title = m.cmd.trim();
+      btn.addEventListener('click', () => { paste(m.cmd); });
       bar.appendChild(btn);
     });
   }
