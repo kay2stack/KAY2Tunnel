@@ -44,8 +44,25 @@ app.use((req, res, next) => {
 // same-origin with its backend — no CORS, shares the stan_token login).
 const KAY2OS_DIR = '/home/kay2/KAY2Tunnel/public/kay2os';
 const kay2osStatic = express.static(KAY2OS_DIR, { index: 'index.html' });
+// Security headers for the kay2OS frontend ONLY (additive — scoped to the
+// kay2os host so the main StanCLI UI is untouched). CSP keeps 'unsafe-inline'
+// because the shell is one big inline script (a nonce rewrite is the follow-up);
+// even so, frame-ancestors/connect-src/object-src materially cut XSS+clickjacking
+// blast radius. frame-src https: is required by the in-app Browser/site apps.
+function kay2osSecHeaders(res) {
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src https:; " +
+    "media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+}
 app.use((req, res, next) => {
   if (req.hostname === 'kay2os.spikeradar.co.uk' && !req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
+    kay2osSecHeaders(res);
     return kay2osStatic(req, res, () => res.sendFile(KAY2OS_DIR + '/index.html'));
   }
   next();
