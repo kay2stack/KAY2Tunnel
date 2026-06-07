@@ -7,23 +7,36 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev":     "node server/index.js",
-    "start":   "pm2 start ecosystem.config.js",
-    "stop":    "pm2 stop stan-cli",
+    "dev": "node server/index.js",
+    "start": "pm2 start ecosystem.config.js",
+    "stop": "pm2 stop stan-cli",
     "restart": "pm2 restart stan-cli",
-    "logs":    "pm2 logs stan-cli",
-    "status":  "pm2 status",
-    "tunnel":  "pm2 start ecosystem.config.js --only stan-cli-tunnel"
+    "logs": "pm2 logs stan-cli",
+    "status": "pm2 status",
+    "tunnel": "pm2 start ecosystem.config.js --only stan-cli-tunnel"
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/kay2stack/KAY2Tunnel.git"
   },
   "dependencies": {
+    "@novnc/novnc": "^1.7.0",
+    "@simplewebauthn/server": "^13.3.1",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
     "multer": "^2.1.1",
     "node-pty": "^1.0.0",
     "ws": "^8.15.1"
+  },
+  "devDependencies": {
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-javascript": "^6.2.5",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "codemirror": "^6.0.2",
+    "esbuild": "^0.28.0"
   }
 }

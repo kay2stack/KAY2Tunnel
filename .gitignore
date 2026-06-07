@@ -27,3 +27,4 @@ Thumbs.db
 
 # Uploads temp
 /tmp/stan-cli-uploads/
+server/passkeys.json

@@ -57,7 +57,15 @@ app.use(express.static(path.join(__dirname, '../public')));
 // lives in /home/kay2/MacPiOs; also reachable at /kay2os.html via the public symlink.
 app.get('/kay2os', (req, res) => res.sendFile('/home/kay2/MacPiOs/kay2os.html'));
 
+// Passkey (WebAuthn) login — PUBLIC routes only (status + the auth challenge/
+// verify that grant a token). Mounted BEFORE the bearerAuth gate so the lock
+// screen can sign in without already holding the token. Enrollment is mounted
+// AFTER the gate (see below) so a passkey can only be added once authenticated.
+const webauthn = require('./webauthn');
+app.use('/api/webauthn', webauthn.authRouter);
+
 app.use('/api', bearerAuth);
+app.use('/api/webauthn', webauthn.registerRouter);
 app.use('/api/files', filesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/agents', agentsRouter);
