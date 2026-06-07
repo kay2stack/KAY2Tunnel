@@ -174,6 +174,17 @@ app.post('/api/clive', express.json({ limit: '256kb' }), async (req, res) => {
   }
 });
 
+// kay2OS cockpit — read-only list of live tmux sessions so the desktop can light
+// up "agent running" dots. Additive; behind the existing /api bearerAuth. Never
+// touches/kills anything — just `tmux ls`.
+app.get('/api/tmux', (req, res) => {
+  require('child_process').execFile('tmux', ['ls', '-F', '#{session_name}'], { timeout: 4000 }, (err, stdout) => {
+    if (err) return res.json({ sessions: [] }); // no tmux server / no sessions
+    const sessions = String(stdout || '').split('\n').map(s => s.trim()).filter(Boolean);
+    res.json({ sessions });
+  });
+});
+
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 const wss = new WebSocketServer({ noServer: true });
