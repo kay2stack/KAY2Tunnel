@@ -103,7 +103,17 @@ registerRouter.post('/register/verify', express.json({ limit: '64kb' }), async (
 });
 
 registerRouter.get('/credentials', (req, res) => {
-  res.json({ credentials: load().map(c => ({ label: c.label, createdAt: c.createdAt })) });
+  res.json({ credentials: load().map(c => ({ id: c.id, label: c.label, createdAt: c.createdAt })) });
+});
+
+registerRouter.post('/credentials/delete', express.json({ limit: '8kb' }), (req, res) => {
+  const id = String(req.body?.id || '');
+  if (!id) return res.status(400).json({ error: 'id required' });
+  const creds = load();
+  const next = creds.filter(c => c.id !== id);
+  if (next.length === creds.length) return res.status(404).json({ error: 'not found' });
+  save(next);
+  res.json({ ok: true, count: next.length });
 });
 
 // ---- LOGIN (public — this is the sign-in) -------------------------------------
