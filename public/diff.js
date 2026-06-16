@@ -121,12 +121,12 @@ const Diff = (() => {
     });
 
     document.getElementById('diff-reject-btn').addEventListener('click', async () => {
-      if (!confirm('Discard all changes in ' + (data.repo || repoPath) + '? This cannot be undone.')) return;
+      if (!await App.confirm('Discard ALL changes in ' + (data.repo || repoPath) + '? This cannot be undone.', { title: 'Discard changes', okLabel: 'Discard' })) return;
       await _doAction('/api/diff/discard', { path: repoPath }, 'Discarding…', 'Discarded');
     });
 
     document.getElementById('diff-undo-btn').addEventListener('click', async () => {
-      if (!confirm('Undo last commit in ' + (data.repo || repoPath) + '? Changes will be kept (soft reset).')) return;
+      if (!await App.confirm('Undo last commit in ' + (data.repo || repoPath) + '? Changes will be kept (soft reset).', { title: 'Undo commit', okLabel: 'Undo' })) return;
       await _doAction('/api/diff/undo', { path: repoPath }, 'Undoing…', 'Undone');
     });
   }
@@ -154,7 +154,7 @@ const Diff = (() => {
     } catch (e) {
       btns.forEach(b => { b.disabled = false; });
       if (approveBtn) approveBtn.textContent = 'Approve';
-      alert('Failed: ' + e.message);
+      App.toast('Failed: ' + e.message, 'error');
     }
   }
 

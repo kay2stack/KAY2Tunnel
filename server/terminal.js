@@ -8,10 +8,15 @@ const HEARTBEAT_MISSES = 2;
 
 const sessions = new Map(); // id → Session
 
+// Optional hook fired when an agent session's process exits (for push notifs).
+let exitNotifier = null;
+function setExitNotifier(cb) { exitNotifier = cb; }
+
 class Session {
   constructor({ name = null, cmd = 'bash', args = [], cwd = ROOT_DIR } = {}) {
     this.id = crypto.randomUUID();
     this.name = name;
+    this.label = null;
     this.cmd = cmd;
     this.cwd = cwd;
     this.clients = new Set();
@@ -35,11 +40,15 @@ class Session {
       }
     });
 
-    this.pty.onExit(() => {
+    this.pty.onExit((e) => {
       for (const ws of this.clients) {
         if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'exit' }));
       }
       sessions.delete(this.id);
+      // Notify on agent process exit (named agent:<id> sessions only).
+      if (exitNotifier && this.name && this.name.startsWith('agent:')) {
+        try { exitNotifier({ name: this.name, cwd: this.cwd, exitCode: e && e.exitCode }); } catch {}
+      }
     });
   }
 
@@ -75,9 +84,23 @@ class Session {
     ws.on('close', () => clearInterval(iv));
   }
 
-  write(data) { this.pty.write(data); this.lastActive = Date.now(); }
-  resize(cols, rows) { this.pty.resize(cols, rows); }
-  kill() { this.pty.kill(); }
+  write(data) {
+    try { this.pty.write(data); this.lastActive = Date.now(); } catch { /* pty gone */ }
+  }
+  resize(cols, rows) {
+    if (!cols || !rows) return;
+    try { this.pty.resize(cols, rows); } catch { /* pty gone — ioctl EBADF on a dead fd */ }
+  }
+  kill() {
+    try { this.pty.kill(); } catch { /* already dead */ }
+  }
+  rename(label) {
+    this.label = label;
+    this.lastActive = Date.now();
+    for (const ws of this.clients) {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'session', id: this.id, name: this.name, label: this.label }));
+    }
+  }
 
   // last N bytes of scrollback as a plain string (for agent card previews)
   tail(bytes = 4096) {
@@ -110,7 +133,7 @@ function handleWs(ws, req) {
   }
 
   session.attach(ws);
-  ws.send(JSON.stringify({ type: 'session', id: session.id, name: session.name }));
+  ws.send(JSON.stringify({ type: 'session', id: session.id, name: session.name, label: session.label }));
 
   ws.on('message', (raw) => {
     let msg; try { msg = JSON.parse(raw); } catch { return; }
@@ -127,6 +150,7 @@ function listSessions() {
   return [...sessions.values()].map(s => ({
     id: s.id,
     name: s.name,
+    label: s.label,
     cmd: s.cmd,
     cwd: s.cwd,
     clients: s.clients.size,
@@ -137,4 +161,19 @@ function listSessions() {
 
 function getSession(id) { return sessions.get(id) || null; }
 
-module.exports = { handleWs, listSessions, getSession };
+function renameSession(id, label) {
+  const session = getSession(id);
+  if (!session) return null;
+  session.rename(label);
+  return session;
+}
+
+function killSession(id) {
+  const session = getSession(id);
+  if (!session) return null;
+  session.kill();
+  sessions.delete(id);
+  return session;
+}
+
+module.exports = { handleWs, listSessions, getSession, renameSession, killSession, setExitNotifier };

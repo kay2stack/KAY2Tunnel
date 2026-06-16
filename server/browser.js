@@ -125,6 +125,16 @@ router.post('/click', express.json(), async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+// POST /api/browser/scroll  { x, y, dx, dy }
+router.post('/scroll', express.json(), async (req, res) => {
+  if (!await ensureConnected()) return res.status(503).json({ error: 'not connected' });
+  try {
+    const { x = 640, y = 400, dx = 0, dy = 0 } = req.body || {};
+    await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: dx, deltaY: dy });
+    res.json({ ok: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/browser/type  { text }
 router.post('/type', express.json(), async (req, res) => {
   if (!await ensureConnected()) return res.status(503).json({ error: 'not connected' });

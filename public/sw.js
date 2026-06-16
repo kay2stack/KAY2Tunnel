@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'stan-cli-v10';
+const CACHE_VERSION = 'stan-cli-v34';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -19,6 +19,11 @@ const SHELL_ASSETS = [
   '/vendor/xterm.css',
   '/vendor/addon-fit.js',
   '/vendor/addon-web-links.js',
+  '/vendor/codemirror.js',
+  '/vendor/qrcode.js',
+  '/vendor/novnc.js',
+  '/vendor/novnc-loader.js',
+  '/screen.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ];
@@ -26,7 +31,9 @@ const SHELL_ASSETS = [
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_VERSION).then(c =>
-      Promise.allSettled(SHELL_ASSETS.map(url => c.add(url)))
+      // {cache:'reload'} bypasses the browser HTTP cache so a new version always
+      // pulls fresh bytes — otherwise a bumped cache can be filled with stale assets.
+      Promise.allSettled(SHELL_ASSETS.map(url => c.add(new Request(url, { cache: 'reload' }))))
     )
   );
   self.skipWaiting();
@@ -45,4 +52,26 @@ self.addEventListener('fetch', e => {
     e.respondWith(fetch(e.request)); return;
   }
   e.respondWith(caches.match(e.request).then(c => c || fetch(e.request)));
+});
+
+// ── Web Push ──────────────────────────────────────────
+self.addEventListener('push', e => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch {}
+  e.waitUntil(self.registration.showNotification(data.title || 'Stan CLI', {
+    body: data.body || '',
+    tag: data.tag || undefined,
+    data: { url: data.url || '/' },
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+  }));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const target = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wins => {
+    for (const w of wins) { if ('focus' in w) return w.focus(); }
+    if (clients.openWindow) return clients.openWindow(target);
+  }));
 });

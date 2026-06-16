@@ -1,0 +1,16 @@
+{
+  "name": "MacPiOs",
+  "short_name": "MacPiOs",
+  "description": "MacPiOs — macOS vibes, Raspberry Pi power. Terminal, files, agents, and Clive in one desktop shell.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#080c18",
+  "theme_color": "#080c18",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

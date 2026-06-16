@@ -4,7 +4,8 @@ const path = require('path');
 const { WebSocketServer } = require('ws');
 const { PORT, HOST, AUTH_TOKEN } = require('./config');
 const { bearerAuth, wsAuth } = require('./auth');
-const { handleWs, listSessions, getSession, renameSession, killSession } = require('./terminal');
+const { handleWs, listSessions, getSession, renameSession, killSession, setExitNotifier } = require('./terminal');
+const push = require('./push');
 const { handleVncWs } = require('./vnc');
 const filesRouter = require('./files');
 const aiRouter = require('./ai');
@@ -50,20 +51,40 @@ const kay2osStatic = express.static(KAY2OS_DIR, { index: 'index.html' });
 // even so, frame-ancestors/connect-src/object-src materially cut XSS+clickjacking
 // blast radius. frame-src https: is required by the in-app Browser/site apps.
 function kay2osSecHeaders(res) {
+  // connect-src whitelists the read-only public APIs the desktop apps use
+  // (Weather: Open-Meteo · TON Markets/Explorer: tonapi.io + CoinGecko). These
+  // expose no local data — they only permit outbound fetches to named hosts.
+  // The TON Wallet app self-hosts the TON Connect SDK (so script-src stays
+  // 'self'), but connecting a real wallet needs its HTTP-bridge hosts + the
+  // wallets-list, and the connect modal shows wallet icons (img https:).
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-src https:; " +
-    "media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
+    "img-src 'self' data: blob: https:; font-src 'self'; " +
+    "connect-src 'self' https://api.open-meteo.com https://geocoding-api.open-meteo.com https://tonapi.io https://api.coingecko.com " +
+      "https://config.ton.org https://raw.githubusercontent.com https://bridge.tonapi.io https://connect.tonhubapi.com https://walletbot.me " +
+      "https://tonconnectbridge.mytonwallet.org https://connect.mytonwallet.org https://app.tonkeeper.com https://ton-connect-bridge.bgwapi.io; " +
+    "frame-src https:; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'");
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
-  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(), payment=()');
+  res.setHeader('Permissions-Policy', 'camera=(self), microphone=(), geolocation=(self), payment=()');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000');
 }
 app.use((req, res, next) => {
   if (req.hostname === 'kay2os.spikeradar.co.uk' && !req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
     kay2osSecHeaders(res);
     return kay2osStatic(req, res, () => res.sendFile(KAY2OS_DIR + '/index.html'));
+  }
+  next();
+});
+
+// Marketing landing page: macpios.spikeradar.co.uk → public/macpios (static only,
+// no /api). Mirrors the kay2os host-routing above; links out to the kay2os shell.
+const MACPIOS_DIR = '/home/kay2/KAY2Tunnel/public/macpios';
+const macpiosStatic = express.static(MACPIOS_DIR, { index: 'index.html' });
+app.use((req, res, next) => {
+  if (req.hostname === 'macpios.spikeradar.co.uk') {
+    return macpiosStatic(req, res, () => res.sendFile(MACPIOS_DIR + '/index.html'));
   }
   next();
 });
@@ -90,6 +111,7 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/diff', diffRouter);
 app.use('/api/pi', piRouter);
 app.use('/api/browser', browserRouter);
+app.use('/api/push', push.router);
 app.get('/api/system', (req, res) => res.json({ cpu: system.cpu(), mem: system.mem(), load: system.load(), temp: system.temp(), uptime: system.uptime() }));
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
 app.patch('/api/term/sessions/:id', express.json(), (req, res) => {
@@ -125,6 +147,37 @@ app.get('/api/clips/remote', async (req, res) => {
   } catch {
     res.status(503).json({ error: 'Clip app unavailable' });
   }
+});
+
+// Push a new clip into the shared (cross-device) clipboard.
+app.post('/api/clips/remote', express.json({ limit: '256kb' }), async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text required' });
+  try {
+    const r = await fetch('http://127.0.0.1:7421/api/clips', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AUTH_TOKEN}` },
+      body: JSON.stringify({ text, type: req.body?.type, device: 'StanCLI' }),
+    });
+    if (!r.ok) return res.status(r.status).json({ error: 'Clip API error' });
+    res.json(await r.json().catch(() => ({ ok: true })));
+  } catch {
+    res.status(503).json({ error: 'Clip app unavailable' });
+  }
+});
+
+// When an agent's process exits, push a notification to subscribed devices.
+setExitNotifier(({ name, cwd, exitCode }) => {
+  const agent = (name || '').replace(/^agent:/, '');
+  const labels = { 'claude-code': 'Claude Code', codex: 'Codex', gemini: 'Gemini',
+    'cursor-agent': 'Cursor', hermes: 'Hermes', clive: 'Clive' };
+  const label = labels[agent] || agent || 'Agent';
+  const repo = cwd ? cwd.split('/').pop() : '';
+  push.notify({
+    title: `${label} finished`,
+    body: (repo ? `in ${repo}` : 'session ended') + (exitCode ? ` · exit ${exitCode}` : ''),
+    tag: name, url: '/',
+  });
 });
 
 // kay2OS → Clive (OpenClaw gateway). Same agent/memory/skills as Telegram —

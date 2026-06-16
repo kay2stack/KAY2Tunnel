@@ -28,3 +28,11 @@ Thumbs.db
 # Uploads temp
 /tmp/stan-cli-uploads/
 server/passkeys.json
+
+server/.vapid.json
+server/.push-subs.json
+
+# Stray desktop dir (vacation photos, VNC installer — not project files)
+/Desktop/
+# index.js backups
+server/index.js.bak*

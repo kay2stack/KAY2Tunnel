@@ -129,9 +129,10 @@ const Files = (() => {
         <div id="editor-body"></div>
       </div>
     `;
-    document.getElementById('editor-back').addEventListener('click', () => {
-      if (document.getElementById('editor-dirty') && !document.getElementById('editor-dirty').classList.contains('hidden')) {
-        if (!confirm('Unsaved changes — discard?')) return;
+    document.getElementById('editor-back').addEventListener('click', async () => {
+      const dirty = document.getElementById('editor-dirty');
+      if (dirty && !dirty.classList.contains('hidden')) {
+        if (!await App.confirm('Discard unsaved changes?', { title: 'Unsaved changes', okLabel: 'Discard' })) return;
       }
       init(); navigate(_cwd);
     });
@@ -159,7 +160,8 @@ const Files = (() => {
           body: JSON.stringify({ path, content: ta.value }),
         });
         document.getElementById('editor-dirty').classList.add('hidden');
-      } catch (e) { alert('Save failed: ' + e.message); }
+        App.toast('Saved', 'success', 1500);
+      } catch (e) { App.toast('Save failed: ' + e.message, 'error'); }
     });
   }
 
@@ -169,7 +171,7 @@ const Files = (() => {
   }
 
   async function renamePrompt(fullPath, name, parentPath) {
-    const newName = prompt('Rename to:', name);
+    const newName = await App.prompt('Rename to', name);
     if (!newName || newName === name) return;
     const dir = fullPath.slice(0, fullPath.length - name.length);
     try {
@@ -179,7 +181,7 @@ const Files = (() => {
         body: JSON.stringify({ from: fullPath, to: dir + newName }),
       });
       navigate(parentPath);
-    } catch (e) { alert('Rename failed: ' + e.message); }
+    } catch (e) { App.toast('Rename failed: ' + e.message, 'error'); }
   }
 
   function downloadFile(path, name) {
@@ -192,11 +194,12 @@ const Files = (() => {
   }
 
   async function deleteEntry(fullPath, parentPath) {
-    if (!confirm('Delete ' + fullPath + '?')) return;
+    const base = fullPath.split('/').pop();
+    if (!await App.confirm(`Delete “${base}”? This cannot be undone.`, { title: 'Delete', okLabel: 'Delete' })) return;
     try {
       await App.apiFetch('/api/files?path=' + encodeURIComponent(fullPath), { method: 'DELETE' });
       navigate(parentPath);
-    } catch (e) { alert('Delete failed: ' + e.message); }
+    } catch (e) { App.toast('Delete failed: ' + e.message, 'error'); }
   }
 
   function uploadPrompt() {
@@ -211,13 +214,14 @@ const Files = (() => {
       try {
         await App.apiFetch('/api/files/upload', { method: 'POST', body: fd });
         navigate(_cwd);
-      } catch (e) { alert('Upload failed: ' + e.message); }
+        App.toast('Uploaded ' + file.name, 'success', 1800);
+      } catch (e) { App.toast('Upload failed: ' + e.message, 'error'); }
     });
     inp.click();
   }
 
   async function newFilePrompt() {
-    const name = prompt('New file name:');
+    const name = await App.prompt('New file name');
     if (!name) return;
     const path = (_cwd.endsWith('/') ? _cwd : _cwd + '/') + name;
     try {
@@ -227,11 +231,11 @@ const Files = (() => {
         body: JSON.stringify({ path, content: '' }),
       });
       navigate(_cwd);
-    } catch (e) { alert('Create failed: ' + e.message); }
+    } catch (e) { App.toast('Create failed: ' + e.message, 'error'); }
   }
 
   async function mkdirPrompt() {
-    const name = prompt('New folder name:');
+    const name = await App.prompt('New folder name');
     if (!name) return;
     const path = (_cwd.endsWith('/') ? _cwd : _cwd + '/') + name;
     try {
@@ -241,7 +245,7 @@ const Files = (() => {
         body: JSON.stringify({ path }),
       });
       navigate(_cwd);
-    } catch (e) { alert('Create failed: ' + e.message); }
+    } catch (e) { App.toast('Create failed: ' + e.message, 'error'); }
   }
 
   function fileIcon(name) {

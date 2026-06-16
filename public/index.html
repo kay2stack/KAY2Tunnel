@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Stan CLI</title>
   <link rel="manifest" href="manifest.webmanifest">
-  <meta name="theme-color" content="#F0EEFD">
+  <meta name="theme-color" content="#FF3B5C">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Stan CLI">
@@ -20,6 +20,8 @@
   <script>
     window.onerror = function(m,s,l){var b=document.getElementById('_err-banner');if(b){b.textContent=(s||'').split('/').pop()+':'+l+' — '+m;b.style.display='block';}};
     window.onunhandledrejection = function(e){var b=document.getElementById('_err-banner');if(b){b.textContent='Unhandled: '+(e.reason&&e.reason.message||e.reason);b.style.display='block';}};
+    // Apply saved theme immediately to avoid flash
+    (function(){var t=localStorage.getItem('stan_theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';})();
   </script>
 </head>
 <body>
@@ -52,57 +54,36 @@
 <div id="app" class="hidden">
   <div id="tab-content">
 
-    <!-- Home tab -->
+    <!-- Today tab -->
     <div id="tab-home" class="tab-panel">
-      <div class="home-scroll">
-        <div class="home-header">
-          <div class="home-greeting" id="home-greeting">Good morning, Kane</div>
-          <div class="home-subgreeting">kay2 is online</div>
+      <div class="tab-large-header">
+        <div class="news-large-title">Today</div>
+        <div id="home-date" style="font-size:15px;color:var(--text-dim);margin-top:4px"></div>
+      </div>
+      <div class="news-feed" id="home-feed">
+        <div class="news-section" style="margin-top:24px">
+          <div id="home-hero"></div>
         </div>
-        <div class="home-body">
-          <div class="home-stats-grid">
-            <div class="stat-card">
-              <div class="stat-label">Sessions</div>
-              <div class="stat-value" id="home-session-count">—</div>
-              <div class="stat-sub">Active terminals</div>
-            </div>
-            <div class="stat-card">
-              <div class="stat-label">Status</div>
-              <div class="stat-value" style="color:var(--green);font-size:20px;line-height:1.6">Online</div>
-              <div class="stat-sub">Tailscale connected</div>
-            </div>
+        <div class="news-section" id="home-agents-section">
+          <div class="news-section-header">
+            <span>Your Agents</span>
+            <button class="news-see-all" onclick="App.showTab('agents')">See All</button>
           </div>
-          <div class="section-label">Quick Actions</div>
-          <div class="quick-actions">
-            <button class="quick-action-btn" id="qa-terminal">
-              <div class="quick-action-icon" style="background:var(--accent-dim)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><polyline points="7,9 10,12 7,15"/><line x1="13" y1="15" x2="17" y2="15"/></svg>
-              </div>
-              <div class="quick-action-label">Terminal</div>
-              <div class="quick-action-sub">Open shell</div>
-            </button>
-            <button class="quick-action-btn" id="qa-projects">
-              <div class="quick-action-icon" style="background:var(--blue-bg)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 012-2h3.17a2 2 0 011.41.59L11 7h9a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>
-              </div>
-              <div class="quick-action-label">Projects</div>
-              <div class="quick-action-sub">Browse repos</div>
-            </button>
-            <button class="quick-action-btn" id="qa-agents">
-              <div class="quick-action-icon" style="background:var(--stan-bg)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--stan-fg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/><line x1="9" y1="17" x2="9" y2="17" stroke-width="3"/><line x1="15" y1="17" x2="15" y2="17" stroke-width="3"/></svg>
-              </div>
-              <div class="quick-action-label">Agents</div>
-              <div class="quick-action-sub">Launch AI</div>
-            </button>
-            <button class="quick-action-btn" id="qa-settings">
-              <div class="quick-action-icon" style="background:var(--bg-secondary)">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-              </div>
-              <div class="quick-action-label">Settings</div>
-              <div class="quick-action-sub">Configure</div>
-            </button>
+          <div class="story-list-card" id="home-agents-list">
+            <div style="padding:20px 16px;color:var(--text-dim);font-size:14px">Loading…</div>
           </div>
+        </div>
+        <div class="news-section" id="home-projects-section">
+          <div class="news-section-header">
+            <span>Recent Projects</span>
+            <button class="news-see-all" onclick="App.showTab('projects')">See All</button>
+          </div>
+          <div class="story-list-card" id="home-projects-list">
+            <div style="padding:20px 16px;color:var(--text-dim);font-size:14px">Loading…</div>
+          </div>
+        </div>
+        <div style="padding:0 16px 40px">
+          <div id="home-sys-bar"></div>
         </div>
       </div>
     </div>
@@ -112,7 +93,10 @@
       <div class="top-bar" id="term-topbar">
         <span class="status-dot offline" id="term-status-dot"></span>
         <span class="top-bar-title" id="term-session-label">bash</span>
+        <button class="top-bar-action" id="term-copy-btn" title="Copy selected terminal text">Copy</button>
+        <button class="top-bar-action primary" id="term-paste-btn" title="Paste clipboard into terminal">Paste</button>
         <button class="top-bar-action" id="term-new-btn">New</button>
+        <button class="top-bar-action" id="term-clips-btn">Clips</button>
         <button class="top-bar-action" id="term-sessions-btn">Sessions</button>
       </div>
       <div id="terminal-container"></div>
@@ -150,35 +134,181 @@
       </div>
     </div>
 
-    <!-- Pi Remote tab -->
+    <!-- Pi Control tab -->
     <div id="tab-pi" class="tab-panel hidden">
       <div class="top-bar">
-        <span class="top-bar-title">Pi Remote</span>
+        <span class="top-bar-title">Pi Control</span>
         <button class="top-bar-action" id="pi-refresh-btn">Refresh</button>
       </div>
+      <div id="pi-seg-nav"></div>
       <div class="scroll-list" id="pi-content">
-        <div style="color:var(--text-dim);font-size:14px;text-align:center;padding:40px 0">Loading…</div>
+        <div class="pi-loading">Loading…</div>
       </div>
     </div>
 
     <!-- Browser tab -->
     <div id="tab-browser" class="tab-panel hidden">
       <div class="top-bar">
+        <button class="top-bar-action" id="browser-back-btn" style="display:none">← More</button>
         <span class="status-dot offline" id="browser-status-dot"></span>
         <span class="top-bar-title">Browser</span>
       </div>
       <div id="browser-panel"></div>
     </div>
 
-    <!-- Settings tab -->
-    <div id="tab-settings" class="tab-panel hidden">
-      <div class="top-bar">
-        <span class="top-bar-title">Settings</span>
+    <!-- Screen tab -->
+    <div id="tab-screen" class="tab-panel hidden">
+      <div class="top-bar" id="screen-topbar">
+        <span class="status-dot offline" id="screen-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);flex-shrink:0"></span>
+        <span class="top-bar-title" id="screen-status-label">Pi Desktop</span>
+        <button class="top-bar-action" id="screen-topbar-connect-btn">Connect</button>
+        <button class="top-bar-action" id="screen-topbar-disconnect-btn" style="display:none">Disconnect</button>
+        <button class="top-bar-action" id="screen-fullscreen-btn" title="Fullscreen">⤢</button>
       </div>
-      <div class="scroll-list" id="settings-scroll">
-        <div class="settings-section">
-          <div class="settings-section-title">Security</div>
-          <div class="settings-group">
+      <div id="screen-body" style="flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)"></div>
+    </div>
+
+    <!-- More tab -->
+    <div id="tab-more" class="tab-panel hidden">
+      <div class="tab-large-header">
+        <div class="news-large-title">More</div>
+      </div>
+      <div class="news-feed">
+
+        <!-- System live stats -->
+        <div class="news-section" style="margin-top:24px">
+          <div class="news-section-header"><span>System</span></div>
+          <div class="story-list-card" id="more-sys-card">
+            <div style="padding:20px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px" id="more-sys-grid">
+              <div class="pi-stat"><div class="pi-stat-label">CPU</div><div class="pi-stat-val" id="more-cpu">—</div></div>
+              <div class="pi-stat"><div class="pi-stat-label">MEM</div><div class="pi-stat-val" id="more-mem">—</div></div>
+              <div class="pi-stat"><div class="pi-stat-label">TEMP</div><div class="pi-stat-val" id="more-temp">—</div></div>
+              <div class="pi-stat"><div class="pi-stat-label">LOAD</div><div class="pi-stat-val" id="more-load">—</div></div>
+              <div class="pi-stat"><div class="pi-stat-label">UPTIME</div><div class="pi-stat-val" id="more-uptime">—</div></div>
+              <div class="pi-stat"><div class="pi-stat-label">DISK</div><div class="pi-stat-val" id="more-disk">—</div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pi Control shortcuts -->
+        <div class="news-section">
+          <div class="news-section-header"><span>Pi Control</span></div>
+          <div class="more-shortcut-grid">
+            <button class="more-shortcut-btn" data-pi="overview">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+              <span>Overview</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="processes">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              <span>Processes</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="docker">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3v3H2zM6 9.5h3v3H6zM10 9.5h3v3h-3zM6 5.5h3v3H6zM10 5.5h3v3h-3z"/><path d="M20.6 11.5c-.3-1.7-1.5-2-2.7-2-.2-1.7-1.3-3-3-3-.8 0-1.5.3-2 .8V7h-2v2.5h2v.5H2.5l-.5 1 .5 1h2.5v1h3v-1h3v1h3v-1h3.5c1.4 0 2.5-1.1 2.5-2.5 0 0 .1 0 .1-.5z"/></svg>
+              <span>Docker</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="network">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0114.08 0"/><path d="M1.42 9a16 16 0 0121.16 0"/><path d="M8.53 16.11a6 6 0 016.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+              <span>Network</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="storage">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+              <span>Storage</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="logs">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+              <span>Logs</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="hardware">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="2" x2="9" y2="4"/><line x1="15" y1="2" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="22"/><line x1="15" y1="20" x2="15" y2="22"/><line x1="20" y1="9" x2="22" y2="9"/><line x1="20" y1="14" x2="22" y2="14"/><line x1="2" y1="9" x2="4" y2="9"/><line x1="2" y1="14" x2="4" y2="14"/></svg>
+              <span>Hardware</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="cron">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              <span>Cron</span>
+            </button>
+            <button class="more-shortcut-btn" data-pi="power">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 11-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/></svg>
+              <span>Power</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Tools -->
+        <div class="news-section">
+          <div class="news-section-header"><span>Tools</span></div>
+          <div class="settings-group" style="margin:0 16px">
+            <div class="settings-row" id="more-browser-btn" style="cursor:pointer">
+              <span class="settings-row-label">Remote Browser</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">›</span>
+            </div>
+            <div class="settings-row" id="more-screen-btn" style="cursor:pointer">
+              <span class="settings-row-label">Pi Desktop (VNC)</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">›</span>
+            </div>
+            <div class="settings-row" id="more-clipboard-btn" style="cursor:pointer">
+              <span class="settings-row-label">Shared Clipboard</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">›</span>
+            </div>
+            <div class="settings-row" id="more-claude-btn" style="cursor:pointer">
+              <span class="settings-row-label">Open Claude</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">claude.ai ↗</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Appearance -->
+        <div class="news-section">
+          <div class="news-section-header"><span>Appearance</span></div>
+          <div class="settings-group" style="margin:0 16px">
+            <div class="settings-row">
+              <span class="settings-row-label">Theme</span>
+              <div class="theme-toggle-group" id="theme-toggle">
+                <button class="theme-btn" data-theme="light">Light</button>
+                <button class="theme-btn active" data-theme="auto">Auto</button>
+                <button class="theme-btn" data-theme="dark">Dark</button>
+              </div>
+            </div>
+            <div class="settings-row" id="more-split-row" style="cursor:pointer">
+              <span class="settings-row-label">Split view <span style="color:var(--text-dim);font-weight:400">· wide screens</span></span>
+              <span class="settings-row-value" id="more-split-val" style="color:var(--text-dim)">Off</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Notifications -->
+        <div class="news-section">
+          <div class="news-section-header"><span>Notifications</span></div>
+          <div class="settings-group" style="margin:0 16px">
+            <div class="settings-row" id="more-notif-row" style="cursor:pointer">
+              <span class="settings-row-label">Agent alerts <span style="color:var(--text-dim);font-weight:400">· push to this device</span></span>
+              <span class="settings-row-value" id="more-notif-val" style="color:var(--text-dim)">Off</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Connection info -->
+        <div class="news-section">
+          <div class="news-section-header"><span>Connection</span></div>
+          <div class="settings-group" style="margin:0 16px">
+            <div class="settings-row" id="more-url-row" style="cursor:pointer" title="Tap to copy">
+              <span class="settings-row-label">Tunnel URL</span>
+              <span class="settings-row-value mono-sm" id="more-tunnel-url">stan.spikeradar.co.uk</span>
+            </div>
+            <div class="settings-row">
+              <span class="settings-row-label">Local address</span>
+              <span class="settings-row-value mono-sm" id="more-local-addr">—</span>
+            </div>
+            <div class="settings-row" id="more-qr-btn" style="cursor:pointer">
+              <span class="settings-row-label">Add a device (QR)</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">⊞</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Security -->
+        <div class="news-section">
+          <div class="news-section-header"><span>Security</span></div>
+          <div class="settings-group" style="margin:0 16px">
             <div class="settings-row" id="settings-token-row">
               <span class="settings-row-label">Auth Token</span>
               <span class="settings-row-value" id="settings-token-preview">••••••••</span>
@@ -188,19 +318,27 @@
             </div>
           </div>
         </div>
-        <div class="settings-section">
-          <div class="settings-section-title">About</div>
-          <div class="settings-group">
+
+        <!-- About -->
+        <div class="news-section">
+          <div class="news-section-header"><span>About</span></div>
+          <div class="settings-group" style="margin:0 16px">
             <div class="settings-row">
               <span class="settings-row-label">Stan CLI</span>
-              <span class="settings-row-value">v3.0</span>
+              <span class="settings-row-value">v4.0</span>
             </div>
             <div class="settings-row">
-              <span class="settings-row-label">Host</span>
+              <span class="settings-row-label">Device</span>
               <span class="settings-row-value" id="settings-host">—</span>
+            </div>
+            <div class="settings-row" id="settings-update-row" style="cursor:pointer">
+              <span class="settings-row-label">Check for Updates</span>
+              <span class="settings-row-value" id="settings-update-val" style="color:var(--text-dim)">›</span>
             </div>
           </div>
         </div>
+
+        <div style="height:40px"></div>
       </div>
     </div>
 
@@ -213,15 +351,7 @@
         <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/>
         <polyline points="9,22 9,12 15,12 15,22"/>
       </svg>
-      Home
-    </button>
-    <button class="tab-btn" data-tab="term">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="4" width="18" height="16" rx="2"/>
-        <polyline points="7,9 10,12 7,15"/>
-        <line x1="13" y1="15" x2="17" y2="15"/>
-      </svg>
-      Terminal
+      Today
     </button>
     <button class="tab-btn" data-tab="agents">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -232,42 +362,54 @@
       </svg>
       Agents
     </button>
+    <button class="tab-btn" data-tab="term">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="16" rx="2"/>
+        <polyline points="7,9 10,12 7,15"/>
+        <line x1="13" y1="15" x2="17" y2="15"/>
+      </svg>
+      Terminal
+    </button>
     <button class="tab-btn" data-tab="projects">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 7a2 2 0 012-2h3.17a2 2 0 011.41.59L11 7h9a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/>
       </svg>
       Projects
     </button>
-    <button class="tab-btn" data-tab="pi">
+    <button class="tab-btn" data-tab="screen">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="4" y="6" width="16" height="12" rx="2"/>
-        <circle cx="8" cy="12" r="1.5" fill="currentColor"/>
-        <line x1="12" y1="9" x2="12" y2="15"/>
-        <line x1="15" y1="10" x2="15" y2="14"/>
-        <line x1="18" y1="8" x2="18" y2="16"/>
+        <rect x="2" y="3" width="20" height="14" rx="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/>
+        <line x1="12" y1="17" x2="12" y2="21"/>
       </svg>
-      Pi
+      Screen
     </button>
-    <button class="tab-btn" data-tab="browser">
+    <button class="tab-btn" data-tab="more">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="9"/>
-        <path d="M2 12h20M12 2a15 15 0 010 20M12 2a15 15 0 000 20"/>
-      </svg>
-      Browser
-    </button>
-    <button class="tab-btn" data-tab="settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="3"/>
-        <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+        <circle cx="5" cy="12" r="1" fill="currentColor"/>
+        <circle cx="12" cy="12" r="1" fill="currentColor"/>
+        <circle cx="19" cy="12" r="1" fill="currentColor"/>
       </svg>
       More
     </button>
   </nav>
 </div>
 
+<!-- ── Manual paste fallback ────────────────────────── -->
+<div id="term-paste-sheet" class="terminal-sheet hidden">
+  <div class="terminal-sheet-panel">
+    <div class="terminal-sheet-head">
+      <span>Paste to Terminal</span>
+      <button class="top-bar-action" id="term-paste-cancel-btn">Cancel</button>
+    </div>
+    <textarea id="term-paste-input" placeholder="Paste text here" spellcheck="false" autocomplete="off"></textarea>
+    <button class="terminal-sheet-send" id="term-paste-send-btn">Send to Terminal</button>
+  </div>
+</div>
+
 <!-- ── Sessions sheet ───────────────────────────────── -->
 <div id="sessions-sheet" class="hidden" style="
-  position:fixed;inset:0;z-index:50;background:rgba(28,21,54,0.3);backdrop-filter:blur(4px);
+  position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);
   display:flex;align-items:flex-end;justify-content:center;
 ">
   <div style="
@@ -283,9 +425,29 @@
   </div>
 </div>
 
+<!-- ── Clips panel ────────────────────────────────────── -->
+<div id="clips-panel" class="hidden" style="
+  position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.3);backdrop-filter:blur(4px);
+  display:flex;align-items:flex-end;justify-content:center;
+">
+  <div style="
+    background:var(--bg-card);border-radius:var(--r-xl) var(--r-xl) 0 0;
+    border:1px solid var(--border);width:100%;max-width:600px;
+    max-height:72vh;display:flex;flex-direction:column;
+  ">
+    <div style="display:flex;align-items:center;padding:16px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <span style="font-size:16px;font-weight:700;flex:1;color:var(--text-primary)">Clips</span>
+      <button class="top-bar-action" id="clips-panel-close-btn">Done</button>
+    </div>
+    <div id="clips-panel-list" style="overflow-y:auto;padding:8px 0;flex:1;"></div>
+  </div>
+</div>
+
 <script src="vendor/xterm.js"></script>
 <script src="vendor/addon-fit.js"></script>
 <script src="vendor/addon-web-links.js"></script>
+<script src="vendor/codemirror.js"></script>
+<script src="vendor/qrcode.js"></script>
 <script src="app.js"></script>
 <script src="term.js"></script>
 <script src="projects.js"></script>
@@ -293,5 +455,6 @@
 <script src="diff.js"></script>
 <script src="pi.js"></script>
 <script src="browser.js"></script>
+<script src="screen.js"></script>
 </body>
 </html>
