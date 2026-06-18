@@ -168,6 +168,25 @@
       <div id="screen-body" style="flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)"></div>
     </div>
 
+    <!-- Phone tab -->
+    <div id="tab-phone" class="tab-panel hidden">
+      <div class="top-bar" id="phone-topbar">
+        <span class="status-dot offline" id="phone-status-dot" style="width:8px;height:8px;border-radius:50%;background:var(--text-dim);flex-shrink:0"></span>
+        <span class="top-bar-title" id="phone-status-label">Android Phone</span>
+        <button class="top-bar-action" id="phone-topbar-connect-btn">Connect</button>
+        <button class="top-bar-action" id="phone-topbar-disconnect-btn" style="display:none">Disconnect</button>
+      </div>
+      <div id="phone-body" style="flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)"></div>
+    </div>
+
+    <!-- Automation tab (cron + agent tasks) -->
+    <div id="tab-ops" class="tab-panel hidden">
+      <div class="tab-large-header">
+        <div class="news-large-title">Automation</div>
+      </div>
+      <div id="ops-body" style="flex:1;overflow-y:auto"></div>
+    </div>
+
     <!-- More tab -->
     <div id="tab-more" class="tab-panel hidden">
       <div class="tab-large-header">
@@ -243,6 +262,14 @@
             </div>
             <div class="settings-row" id="more-screen-btn" style="cursor:pointer">
               <span class="settings-row-label">Pi Desktop (VNC)</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">›</span>
+            </div>
+            <div class="settings-row" id="more-phone-btn" style="cursor:pointer">
+              <span class="settings-row-label">Android Phone</span>
+              <span class="settings-row-value" style="color:var(--text-dim)">›</span>
+            </div>
+            <div class="settings-row" id="more-ops-btn" style="cursor:pointer">
+              <span class="settings-row-label">Automation <span style="color:var(--text-dim);font-weight:400">· cron + agent tasks</span></span>
               <span class="settings-row-value" style="color:var(--text-dim)">›</span>
             </div>
             <div class="settings-row" id="more-clipboard-btn" style="cursor:pointer">
@@ -456,5 +483,8 @@
 <script src="pi.js"></script>
 <script src="browser.js"></script>
 <script src="screen.js"></script>
+<script src="phone.js"></script>
+<script src="ops.js"></script>
+<script src="shell.js"></script>
 </body>
 </html>

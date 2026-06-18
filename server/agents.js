@@ -110,17 +110,37 @@ function isInstalled(cmd) {
 }
 
 function agentSession(agentId) {
-  return listSessions().find(s => s.name && s.name.startsWith(`agent:${agentId}`)) || null;
+  return agentSessions(agentId)[0] || null;
+}
+
+// All live sessions for an agent. Sessions are named `agent:<id>@<projectKey>`
+// so the SAME agent can run in multiple projects at once (and different agents
+// in parallel). Also matches the legacy bare `agent:<id>` name.
+function agentSessions(agentId) {
+  const exact = `agent:${agentId}`;
+  const pref = `agent:${agentId}@`;
+  return listSessions().filter(s => s.name === exact || (s.name && s.name.startsWith(pref)));
+}
+
+// Unique session name for an (agent, project) pair. Home dir → '~'.
+function agentSessionName(agentId, projectPath) {
+  const key = launchPathKey(projectPath);
+  return `agent:${agentId}@${key || '~'}`;
+}
+
+function sessionView(s) {
+  return { id: s.id, cwd: s.cwd, lastActive: s.lastActive, createdAt: s.createdAt, clients: s.clients };
 }
 
 // GET /api/agents
 router.get('/', (req, res) => {
   const result = AGENT_DEFS.map(a => {
-    const running = agentSession(a.id);
+    const sess = agentSessions(a.id).map(sessionView);
     return {
       ...a,
       installed: a.cmd ? isInstalled(a.cmd) : true,
-      session: running ? { id: running.id, cwd: running.cwd, lastActive: running.lastActive, createdAt: running.createdAt, clients: running.clients } : null,
+      sessions: sess,
+      session: sess[0] || null,   // back-compat for older consumers
     };
   });
   res.json(result);
@@ -135,7 +155,13 @@ router.get('/launch-dirs', (req, res) => {
   res.json(dirs);
 });
 
-// GET /api/agents/:id/tail — last chunk of output for agent card preview
+// GET /api/agents/session/:sid/tail — output for ONE running session (parallel-safe)
+router.get('/session/:sid/tail', (req, res) => {
+  const session = getSession(req.params.sid);
+  res.json({ tail: session ? session.tail(2048) : '' });
+});
+
+// GET /api/agents/:id/tail — first session's output (legacy/back-compat)
 router.get('/:id/tail', (req, res) => {
   const s = agentSession(req.params.id);
   if (!s) return res.json({ tail: '' });
@@ -152,19 +178,17 @@ router.post('/launch', express.json(), (req, res) => {
   const cwd = resolveLaunchCwd(projectPath);
   if (!cwd) return res.status(400).json({ error: 'Path outside home directory' });
 
-  // Check existing session for this agent
-  const existing = agentSession(agentId);
+  const name = agentSessionName(agentId, projectPath);
+  // Reattach ONLY if this agent is already running in THIS project. Launching
+  // the same agent in a different project — or any other agent — starts a fresh
+  // session, so agents run in parallel instead of stealing each other's shell.
+  const existing = listSessions().find(s => s.name === name);
   if (existing) return res.json({ sessionId: existing.id, reattached: true });
 
-  // Session is created lazily on first WS connection with ?name=agent:<id>&cmd=<cmd>&cwd=<cwd>
-  // Return the params for the client to use when opening the WS
+  // Session is created lazily on first WS connection with ?name=<name>&cmd=&cwd=
   res.json({
     sessionId: null,
-    wsParams: {
-      name: `agent:${agentId}`,
-      cmd: def.cmd,
-      cwd,
-    },
+    wsParams: { name, cmd: def.cmd, cwd },
   });
 });
 

@@ -14,6 +14,8 @@ const projectsRouter = require('./projects');
 const diffRouter = require('./diff');
 const piRouter = require('./pi');
 const browserRouter = require('./browser');
+const androidRouter = require('./android');
+const opsRouter = require('./ops');
 const system = require('./system');
 
 const app = express();
@@ -111,6 +113,8 @@ app.use('/api/projects', projectsRouter);
 app.use('/api/diff', diffRouter);
 app.use('/api/pi', piRouter);
 app.use('/api/browser', browserRouter);
+app.use('/api/android', androidRouter);
+app.use('/api/ops', opsRouter);
 app.use('/api/push', push.router);
 app.get('/api/system', (req, res) => res.json({ cpu: system.cpu(), mem: system.mem(), load: system.load(), temp: system.temp(), uptime: system.uptime() }));
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
@@ -281,3 +285,6 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 server.listen(PORT, HOST, () => console.log(`Stan CLI v1.0.0 — http://${HOST}:${PORT}`));
+
+// System monitor — fires push notifications on reboots, phone connect/disconnect, low battery.
+require('./monitor').start();

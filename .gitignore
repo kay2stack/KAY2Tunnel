@@ -31,6 +31,7 @@ server/passkeys.json
 
 server/.vapid.json
 server/.push-subs.json
+server/.monitor-state.json
 
 # Stray desktop dir (vacation photos, VNC installer — not project files)
 /Desktop/

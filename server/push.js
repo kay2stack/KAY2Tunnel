@@ -64,4 +64,6 @@ router.post('/test', express.json(), async (req, res) => {
   res.json({ ok: true, count: subs.length });
 });
 
-module.exports = { router, notify };
+function subCount() { return subs.length; }
+
+module.exports = { router, notify, subCount };

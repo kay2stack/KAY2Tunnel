@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'stan-cli-v34';
+const CACHE_VERSION = 'stan-cli-v38';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -24,6 +24,9 @@ const SHELL_ASSETS = [
   '/vendor/novnc.js',
   '/vendor/novnc-loader.js',
   '/screen.js',
+  '/phone.js',
+  '/ops.js',
+  '/shell.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
 ];

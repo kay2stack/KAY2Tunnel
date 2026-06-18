@@ -52,18 +52,23 @@ const Agents = (() => {
     try {
       const r = await App.apiFetch('/api/agents');
       const agents = await r.json();
-      const running = agents.filter(a => a.session);
+      const pairs = agents.flatMap(a => (a.sessions || []).map(s => ({ agent: a, session: s })));
 
-      // Check for new sessions (agent started) → maybe request notification permission
-      const currentIds = new Set(running.map(a => a.session.id));
+      // If the set of running sessions changed (one started/stopped), re-render
+      // so cards appear/disappear — otherwise just refresh the live previews.
+      const currentIds = new Set(pairs.map(p => p.session.id));
+      const changed = currentIds.size !== _prevSessionIds.size
+        || [...currentIds].some(id => !_prevSessionIds.has(id));
       _prevSessionIds = currentIds;
 
-      // Refresh tail previews for running agents
-      running.forEach(a => {
-        const el = document.querySelector(`[data-preview-for="${a.id}"]`);
-        const durEl = document.querySelector(`[data-dur-for="${a.id}"]`);
-        if (el) loadTail(a.id, el);
-        if (durEl && a.session.createdAt) durEl.textContent = fmtDuration(Date.now() - a.session.createdAt);
+      const list = document.getElementById('agents-list');
+      if (changed && list) { render(agents, list); return; }
+
+      pairs.forEach(p => {
+        const el = document.querySelector(`[data-preview-for="${p.session.id}"]`);
+        const durEl = document.querySelector(`[data-dur-for="${p.session.id}"]`);
+        if (el) loadTail(p.session.id, el);
+        if (durEl && p.session.createdAt) durEl.textContent = fmtDuration(Date.now() - p.session.createdAt);
       });
     } catch {}
   }
@@ -103,14 +108,15 @@ const Agents = (() => {
     container.innerHTML = '';
     _agentsCache = agents;
 
-    const running     = agents.filter(a => a.session);
+    // One card per running SESSION — an agent may have several (one per project).
+    const runningPairs = agents.flatMap(a => (a.sessions || []).map(s => ({ agent: a, session: s })));
     const launchable  = agents.filter(a => a.cmd);                 // claude-code, codex, gemini, cursor, hermes
     const stan        = agents.find(a => a.id === 'stan');
 
     // 1. Running agents pinned on top
-    if (running.length) {
+    if (runningPairs.length) {
       container.appendChild(sectionLabel('Running'));
-      running.forEach(a => container.appendChild(makeRunningCard(a)));
+      runningPairs.forEach(p => container.appendChild(makeRunningCard(p.agent, p.session)));
     }
 
     // 2. Target-first launcher
@@ -120,15 +126,16 @@ const Agents = (() => {
     if (stan) container.appendChild(makeStanCard(stan));
   }
 
-  // ── Running agent card ────────────────────────────
-  function makeRunningCard(agent) {
+  // ── Running agent card (one per session) ──────────
+  function makeRunningCard(agent, session) {
     const icon = ICONS[agent.id] || { letter: '?', bg: '#555' };
     const card = document.createElement('div');
     card.className = 'agent-card running-card';
     card.setAttribute('data-agent-id', agent.id);
+    card.setAttribute('data-session-id', session.id);
 
-    const repo = agent.session?.cwd ? agent.session.cwd.split('/').pop() : '';
-    const dur  = agent.session?.createdAt ? fmtDuration(Date.now() - agent.session.createdAt) : '';
+    const repo = session?.cwd ? session.cwd.split('/').pop() : '';
+    const dur  = session?.createdAt ? fmtDuration(Date.now() - session.createdAt) : '';
     const meta = (repo ? esc(repo) + ' · ' : '') + esc(agent.provider);
 
     card.innerHTML = `
@@ -140,7 +147,7 @@ const Agents = (() => {
         </div>
         <div class="agent-status running">
           <span class="status-dot connected"></span> Running
-          <span class="agent-dur" data-dur-for="${esc(agent.id)}">${esc(dur)}</span>
+          <span class="agent-dur" data-dur-for="${esc(session.id)}">${esc(dur)}</span>
         </div>
       </div>`;
 
@@ -149,21 +156,21 @@ const Agents = (() => {
     const viewBtn = document.createElement('button');
     viewBtn.className = 'agent-btn primary';
     viewBtn.textContent = 'Open Terminal';
-    viewBtn.addEventListener('click', () => App.openTerminalForSession(agent.session.id));
+    viewBtn.addEventListener('click', () => App.openTerminalForSession(session.id));
     const stopBtn = document.createElement('button');
     stopBtn.className = 'agent-btn danger';
     stopBtn.textContent = 'Stop';
-    stopBtn.addEventListener('click', () => stopAgent(agent.id, agent.session.id));
+    stopBtn.addEventListener('click', () => stopAgent(agent.id, session.id));
     actions.appendChild(viewBtn);
     actions.appendChild(stopBtn);
     card.appendChild(actions);
 
     const preview = document.createElement('div');
     preview.className = 'agent-output';
-    preview.setAttribute('data-preview-for', agent.id);
+    preview.setAttribute('data-preview-for', session.id);
     preview.textContent = 'Loading output…';
     card.appendChild(preview);
-    loadTail(agent.id, preview);
+    loadTail(session.id, preview);
 
     return card;
   }
@@ -373,9 +380,9 @@ const Agents = (() => {
     return el;
   }
 
-  async function loadTail(agentId, el) {
+  async function loadTail(sessionId, el) {
     try {
-      const r = await App.apiFetch(`/api/agents/${agentId}/tail`);
+      const r = await App.apiFetch(`/api/agents/session/${sessionId}/tail`);
       const { tail } = await r.json();
       const clean = tail.replace(/\x1b\[[0-9;]*[mGKH]/g, '').replace(/\r/g, '');
       const lines = clean.split('\n').filter(l => l.trim());

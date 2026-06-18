@@ -28,6 +28,7 @@ const App = (() => {
     if (_activeTab === 'agents'  && typeof Agents  !== 'undefined' && name !== 'agents')  Agents.deactivate?.();
     if (_activeTab === 'pi'      && typeof Pi       !== 'undefined' && name !== 'pi')      Pi.deactivate?.();
     if (_activeTab === 'browser' && typeof Browser  !== 'undefined' && name !== 'browser') Browser.deactivate?.();
+    if (_activeTab === 'phone'   && typeof Phone    !== 'undefined' && name !== 'phone')   Phone.deactivate?.();
 
     // Hide all panels, clear active tab buttons
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
@@ -38,7 +39,7 @@ const App = (() => {
     panel.classList.remove('hidden');
 
     // Activate the correct tab button (pi/browser don't have tab buttons — highlight 'more')
-    const tabName = (name === 'pi' || name === 'browser') ? 'more' : name;
+    const tabName = (name === 'pi' || name === 'browser' || name === 'phone' || name === 'ops') ? 'more' : name;
     const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
     if (btn) btn.classList.add('active');
 
@@ -57,6 +58,8 @@ const App = (() => {
     if (name === 'pi')       Pi?.activate();
     if (name === 'browser')  Browser?.activate();
     if (name === 'screen')   Screen?.activate();
+    if (name === 'phone')    Phone?.activate();
+    if (name === 'ops')      Ops?.activate();
     if (name === 'home')     loadHomeStats();
     if (name === 'more')     { loadMoreStats(); loadSettings(); refreshNotifUI(); }
 
@@ -525,10 +528,15 @@ const App = (() => {
       if (el?.requestFullscreen) el.requestFullscreen();
     });
 
+    document.getElementById('phone-topbar-connect-btn')?.addEventListener('click', () => Phone?.connect());
+    document.getElementById('phone-topbar-disconnect-btn')?.addEventListener('click', () => Phone?.disconnect());
+
     // More tab navigation
     document.getElementById('more-pi-btn')?.addEventListener('click', () => showTab('pi'));
     document.getElementById('more-browser-btn')?.addEventListener('click', () => showTab('browser'));
     document.getElementById('more-screen-btn')?.addEventListener('click', () => showTab('screen'));
+    document.getElementById('more-phone-btn')?.addEventListener('click', () => showTab('phone'));
+    document.getElementById('more-ops-btn')?.addEventListener('click', () => showTab('ops'));
     document.getElementById('more-claude-btn')?.addEventListener('click', openClaude);
     document.getElementById('more-clipboard-btn')?.addEventListener('click', openClipboard);
     document.getElementById('more-qr-btn')?.addEventListener('click', openDeviceQR);
