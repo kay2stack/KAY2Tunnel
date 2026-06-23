@@ -19,6 +19,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const push = require('./push');
 const { ROOT_DIR } = require('./config');
 
 // Attachments from a phone/device land here (central, outside any repo) so a
@@ -145,6 +146,21 @@ class ChatSession {
     return '';
   }
 
+  // Turn finished and NO client is attached → the user walked away (locked the
+  // phone, backgrounded the app — iOS drops the socket). Push so they can rein in
+  // an autopilot from anywhere. If someone's watching live, stay silent.
+  _notifyDone() {
+    if (this.clients.size > 0) return;
+    try {
+      push.notify({
+        title: 'Stan · ' + this.name,
+        body: (this._lastText() || 'Turn complete — tap to open').slice(0, 180),
+        tag: 'chat-' + this.id,
+        url: '/stanchat/?c=' + this.id,
+      });
+    } catch {}
+  }
+
   _spawn(resume) {
     const args = [
       '--print',
@@ -255,6 +271,7 @@ class ChatSession {
           this._push({ t: 'system', level: 'warn', text: 'Turn ended: ' + ev.subtype });
         }
         this._broadcast({ type: 'status', status: this.status, lastResult: this.lastResult });
+        this._notifyDone();
         break;
     }
   }

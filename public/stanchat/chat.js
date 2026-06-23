@@ -463,6 +463,51 @@
     usagePoll = setInterval(() => { if (!document.hidden) fetchUsage(); }, 90000);
   }
 
+  // ── Push notifications — get pinged when a turn finishes while you're away ──
+  function pushSupported() { return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window; }
+  function _b64ToU8(b64) {
+    const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+    const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(s), arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  }
+  async function pushIsOn() {
+    if (!pushSupported()) return false;
+    try { const reg = await navigator.serviceWorker.ready; return !!(await reg.pushManager.getSubscription()); } catch { return false; }
+  }
+  async function togglePush(btn) {
+    if (!pushSupported()) { if (btn) btn.textContent = 'Not supported'; return; }
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) {
+      try { await api('/api/push/unsubscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: existing.endpoint }) }); } catch {}
+      try { await existing.unsubscribe(); } catch {}
+      haptic(8); renderPushRow(); return;
+    }
+    if ((await Notification.requestPermission()) !== 'granted') { renderPushRow(); return; }
+    try {
+      const { key } = await api('/api/push/vapid').then(r => r.json());
+      const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _b64ToU8(key) });
+      await api('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub }) });
+      haptic(14); api('/api/push/test', { method: 'POST' }).catch(() => {});
+    } catch {}
+    renderPushRow();
+  }
+  async function renderPushRow() {
+    const btn = $('s-push'); if (!btn) return;
+    if (!pushSupported()) { btn.textContent = 'Unsupported'; btn.disabled = true; btn.classList.remove('sel'); return; }
+    const on = await pushIsOn();
+    btn.textContent = on ? 'On' : 'Off';
+    btn.classList.toggle('sel', on);
+  }
+  // Jump to a specific chat (push deep-link / SW focus message).
+  function openChatId(id) {
+    if (!id || id === sessionId) return;
+    sessionId = id; localStorage.setItem(LS.last, id);
+    closeDrawer(); clearThread(); stick = true; connect(false);
+  }
+
   // One rAF that paints any queued streaming prose AND follows the bottom — at
   // most once per frame no matter how many deltas arrived, and only scrolling
   // when the reader is still stuck to the bottom.
@@ -827,6 +872,9 @@
     const modelOpts = MODELS.map(m => `<button class="opt ${cfg.model === m.v ? 'sel' : ''}" data-smodel="${esc(m.v)}">${esc(m.label)}</button>`).join('');
     body.innerHTML = `
       <div class="drawer-section-label">Appearance</div><div class="opt-grid">${themeBtns}</div>
+      <div class="drawer-section-label">Notifications</div>
+      <div class="opt-grid"><button class="opt" id="s-push">Off</button></div>
+      <div class="mode-note">Push when a turn finishes while StanChat is closed or your phone's locked — rein in an autopilot from anywhere.</div>
       <div class="drawer-section-label">Default mode · new chats</div><div class="opt-grid">${modeOpts}</div>
       <div class="mode-note" id="s-note">${esc((MODES.find(m => m.v === cfg.mode) || {}).note || '')}</div>
       <div class="drawer-section-label">Default model · new chats</div><div class="opt-grid">${modelOpts}</div>
@@ -855,6 +903,8 @@
       await Promise.all(l.filter(s => !isLive(s)).map(s => api('/api/chat/' + s.id, { method: 'DELETE' }).catch(() => {})));
       renderSessions();
     });
+    renderPushRow();
+    const sp = $('s-push'); if (sp) sp.addEventListener('click', () => togglePush());
     $('s-back').addEventListener('click', () => renderSessions());
   }
 
@@ -1037,7 +1087,15 @@
     showEmpty();
     $('chip-mode-v').textContent = modeLabel(cfg.mode);
     $('chip-project-v').textContent = cfg.dirLabel || 'Home';
-    sessionId = localStorage.getItem(LS.last) || null;
+    // Deep-link from a push notification: /stanchat/?c=<chatId> opens that chat.
+    let deepChat = null;
+    if (_standalone) {
+      try {
+        const p = new URLSearchParams(location.search).get('c');
+        if (p) { deepChat = p; history.replaceState(null, '', location.pathname); }
+      } catch {}
+    }
+    sessionId = deepChat || localStorage.getItem(LS.last) || null;
     if (sessionId) connect(false); else setStatus('— tap + to start');
     updateSendDim();
     startUsagePoll();
@@ -1093,7 +1151,16 @@
     if (token) tryToken(token).then(ok => ok ? boot() : showAuth());
     else showAuth();
 
-    if (_standalone && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+    if (_standalone && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+      // Tapping a push when a window is already open: the SW focuses us and posts
+      // which chat to show.
+      navigator.serviceWorker.addEventListener('message', e => {
+        if (e.data && e.data.type === 'open-chat' && e.data.url) {
+          try { const id = new URL(e.data.url, location.origin).searchParams.get('c'); if (id) openChatId(id); } catch {}
+        }
+      });
+    }
   }
   // ── Mount API — one client, two surfaces ─────────────────────────────────
   // Markup injected into a ShadowRoot when embedded in the Stan CLI cockpit.
