@@ -44,6 +44,7 @@ const App = (() => {
     if (btn) btn.classList.add('active');
 
     _activeTab = name;
+    document.body.dataset.tab = name;
 
     // Back buttons for secondary panels
     const piBack = document.getElementById('pi-back-btn');
@@ -328,6 +329,230 @@ const App = (() => {
     } catch { return false; }
   }
 
+  // ── QR cross-device sign-in ("Sign in with phone") ─────────────────────
+  // Desktop (no token) shows a QR; a trusted phone scans it and approves; the
+  // desktop polls and receives the token. See server/qrlogin.js for the model.
+  async function _validToken(t) {
+    if (!t) return false;
+    try { const r = await fetch('/api/term/sessions', { headers: { Authorization: 'Bearer ' + t } }); return r.ok; }
+    catch { return false; }
+  }
+
+  // WebAuthn helpers (mirror the kay2OS shell) — let the phone approve via Face ID
+  // even if it isn't already signed in. base64url ⇄ ArrayBuffer for the API.
+  const _b64uToBuf = s => { s = String(s).replace(/-/g,'+').replace(/_/g,'/'); const pad = s.length%4?4-(s.length%4):0; s += '='.repeat(pad);
+    const bin = atob(s), u = new Uint8Array(bin.length); for (let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return u.buffer; };
+  const _bufToB64u = b => { const u = new Uint8Array(b); let s=''; for (let i=0;i<u.length;i++) s+=String.fromCharCode(u[i]);
+    return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); };
+  async function _passkeyEnrolled() {
+    if (!(window.PublicKeyCredential && navigator.credentials)) return false;
+    try { const r = await fetch('/api/webauthn/status'); return r.ok && (await r.json()).enrolled === true; } catch { return false; }
+  }
+  async function _passkeyLogin() {
+    const r = await fetch('/api/webauthn/auth/options'); if (!r.ok) throw new Error('no passkeys');
+    const o = await r.json(); o.challenge = _b64uToBuf(o.challenge);
+    if (o.allowCredentials) o.allowCredentials = o.allowCredentials.map(c => ({ ...c, id: _b64uToBuf(c.id) }));
+    const c = await navigator.credentials.get({ publicKey: o }), rsp = c.response;
+    const body = { id: c.id, rawId: _bufToB64u(c.rawId), type: c.type,
+      response: { authenticatorData: _bufToB64u(rsp.authenticatorData), clientDataJSON: _bufToB64u(rsp.clientDataJSON),
+        signature: _bufToB64u(rsp.signature), userHandle: rsp.userHandle ? _bufToB64u(rsp.userHandle) : undefined },
+      clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {} };
+    const v = await fetch('/api/webauthn/auth/verify', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const j = await v.json(); if (!v.ok || !j.verified || !j.token) throw new Error(j.error || 'verify failed');
+    return j.token;
+  }
+
+  // --- Desktop side: show QR + poll for approval ---
+  let _qrPollTimer = null, _qrAbort = false;
+  async function startQrLogin() {
+    const card = document.getElementById('auth-card');
+    const panel = document.getElementById('qr-login-panel');
+    const body = document.getElementById('qr-login-body');
+    card.classList.add('hidden'); panel.classList.remove('hidden');
+    body.innerHTML = '<div class="qr-login-status">Starting…</div>';
+    _qrAbort = false;
+    let sess;
+    try { sess = await (await fetch('/api/qr/start', { method: 'POST' })).json(); }
+    catch { body.innerHTML = '<div class="qr-approve-fail">Cannot reach server.</div>'; return; }
+    const url = tunnelBase() + '/#qr=' + encodeURIComponent(sess.id);
+    let svg = ''; const qr = _makeQR(url);
+    if (qr) { try { svg = qr.createSvgTag({ cellSize: 5, margin: 2, scalable: true }); } catch {} }
+    body.innerHTML = `
+      <div class="qr-card">${svg || '<div style="padding:48px;color:var(--text-dim)">QR unavailable</div>'}</div>
+      <div class="qr-login-status">In the Stan app on your signed-in iPhone, open <b>More → Scan sign-in QR</b>, then approve.</div>
+      <div class="qr-login-code">Confirm code <b>${esc(sess.code)}</b></div>`;
+    const started = Date.now();
+    const poll = async () => {
+      if (_qrAbort) return;
+      if (Date.now() - started > (sess.ttl || 180000)) {
+        body.innerHTML = '<div class="qr-approve-fail">Code expired — tap Cancel and try again.</div>'; return;
+      }
+      try {
+        const j = await (await fetch('/api/qr/poll?id=' + encodeURIComponent(sess.id) + '&secret=' + encodeURIComponent(sess.secret))).json();
+        if (j.status === 'approved' && j.token) {
+          _token = j.token; localStorage.setItem('stan_token', j.token);
+          cancelQrLogin(); launch(); return;
+        }
+        if (j.status === 'expired') { body.innerHTML = '<div class="qr-approve-fail">Code expired — tap Cancel and try again.</div>'; return; }
+      } catch {}
+      _qrPollTimer = setTimeout(poll, 2000);
+    };
+    _qrPollTimer = setTimeout(poll, 1500);
+  }
+  function cancelQrLogin() {
+    _qrAbort = true; if (_qrPollTimer) { clearTimeout(_qrPollTimer); _qrPollTimer = null; }
+    document.getElementById('qr-login-panel')?.classList.add('hidden');
+    document.getElementById('auth-card')?.classList.remove('hidden');
+  }
+
+  // --- Phone side: handle a /#qr=<id> link by approving the desktop ---
+  async function tryQrApprove() {
+    const m = (location.hash || '').match(/(?:^#|&)qr=([^&]+)/);
+    if (!m) return false;
+    const id = decodeURIComponent(m[1]);
+    history.replaceState(null, '', location.pathname + location.search);
+    document.getElementById('auth-card')?.classList.add('hidden');
+    document.getElementById('qr-approve-panel')?.classList.remove('hidden');
+    _runApproval(id, document.getElementById('qr-approve-body'));
+    return true;
+  }
+
+  // Shared approval driver for any entry point (hash link or in-app scan).
+  // This phone must hold the token to approve — saved login, else Face ID,
+  // else a hint to sign in. `onCancel` lets a bottom sheet close itself instead
+  // of reloading the page (the default the hash flow relies on).
+  async function _runApproval(id, body, onCancel) {
+    const cancel = onCancel || (() => location.replace(location.pathname));
+    body.innerHTML = '<div class="qr-approve-msg">Checking…</div>';
+    let tok = localStorage.getItem('stan_token');
+    if (tok && !(await _validToken(tok))) tok = null;
+    if (!tok && await _passkeyEnrolled()) {
+      body.innerHTML = '<div class="qr-approve-msg">Use Face ID to approve this sign-in.</div>'
+        + '<button id="qr-approve-passkey" class="auth-secondary-btn" type="button">Approve with Face ID</button>'
+        + '<button id="qr-approve-cancel" class="auth-secondary-btn" type="button">Cancel</button>';
+      document.getElementById('qr-approve-cancel').onclick = cancel;
+      document.getElementById('qr-approve-passkey').onclick = async () => {
+        try { tok = await _passkeyLogin(); localStorage.setItem('stan_token', tok); }
+        catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') body.innerHTML = '<div class="qr-approve-fail">Face ID failed — try again.</div>'; return; }
+        _doApprove(id, tok, body, onCancel);
+      };
+      return;
+    }
+    if (!tok) {
+      body.innerHTML = '<div class="qr-approve-msg">Sign in on this phone first, then scan again.</div>'
+        + '<button id="qr-approve-cancel" class="auth-secondary-btn" type="button">OK</button>';
+      document.getElementById('qr-approve-cancel').onclick = cancel;
+      return;
+    }
+    _doApprove(id, tok, body, onCancel);
+  }
+
+  async function _doApprove(id, tok, body, onCancel) {
+    body.innerHTML = '<div class="qr-approve-msg">Loading…</div>';
+    let code = '';
+    try {
+      const r = await fetch('/api/qr/info?id=' + encodeURIComponent(id), { headers: { Authorization: 'Bearer ' + tok } });
+      if (r.ok) code = (await r.json()).code || '';
+    } catch {}
+    // From the auth-screen hash flow we reload to clear the panel; the in-app
+    // scanner passes its own cancel so it just closes the sheet.
+    const cancel = onCancel || (() => location.replace(location.pathname));
+    if (!code) {
+      body.innerHTML = '<div class="qr-approve-fail">This request expired. Refresh the desktop and scan again.</div>'
+        + '<button id="qr-approve-cancel" class="auth-secondary-btn" type="button">OK</button>';
+      document.getElementById('qr-approve-cancel').onclick = cancel; return;
+    }
+    body.innerHTML = `
+      <div class="qr-approve-msg">Make sure this matches the code on your desktop:</div>
+      <div class="qr-approve-bigcode">${esc(code)}</div>
+      <button id="qr-approve-yes" class="auth-secondary-btn" type="button" style="border-color:var(--accent);color:var(--accent)">Approve sign-in</button>
+      <button id="qr-approve-no" class="auth-secondary-btn" type="button">Cancel</button>`;
+    document.getElementById('qr-approve-no').onclick = cancel;
+    document.getElementById('qr-approve-yes').onclick = async () => {
+      document.getElementById('qr-approve-yes').disabled = true;
+      try {
+        const r = await fetch('/api/qr/approve', { method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tok },
+          body: JSON.stringify({ id }) });
+        if (!r.ok) throw new Error();
+        body.innerHTML = '<div class="qr-approve-ok">✓ Approved</div><div class="qr-approve-msg">Your desktop is signing in — you can close this tab.</div>';
+      } catch { body.innerHTML = '<div class="qr-approve-fail">Approval failed — the request may have expired.</div>'; }
+    };
+  }
+
+  // --- In-app QR scanner (signed-in phone approves a desktop) ---
+  // iOS native camera opens scanned URLs in Safari, not the installed PWA, which
+  // breaks the #qr= handoff. So we decode the QR *inside* the app (jsQR over a
+  // getUserMedia frame) and run the same approval flow without ever leaving here.
+  function _parseQrId(text) {
+    if (!text) return null;
+    const m = String(text).match(/[#&?]qr=([^&\s]+)/);
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch { return m[1]; }
+  }
+
+  function openQrScanner() {
+    if (!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia)) {
+      toast('Camera not available on this device', 'error'); return;
+    }
+    if (typeof jsQR === 'undefined') { toast('Scanner unavailable', 'error'); return; }
+    _bottomSheet('Scan to approve', (body, close) => {
+      body.innerHTML = `
+        <div class="qr-scan-wrap"><video class="qr-scan-video" playsinline muted></video><div class="qr-scan-frame"></div></div>
+        <div class="qr-scan-status">Point at the “Sign in with phone” QR on your computer…</div>`;
+      const video = body.querySelector('.qr-scan-video');
+      video.muted = true; video.setAttribute('playsinline', ''); // iOS autoplay in standalone PWA
+      const status = body.querySelector('.qr-scan-status');
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      let stream = null, raf = 0, done = false;
+
+      const stop = () => {
+        done = true;
+        if (raf) cancelAnimationFrame(raf);
+        if (stream) { try { stream.getTracks().forEach(t => t.stop()); } catch {} stream = null; }
+      };
+      // Release the camera however the sheet is dismissed (Done / tap-outside).
+      const overlay = body.closest('.app-sheet-overlay');
+      overlay?.querySelector('.app-sheet-close')?.addEventListener('click', stop);
+      overlay?.addEventListener('click', e => { if (e.target === overlay) stop(); });
+
+      const tick = () => {
+        if (done) return;
+        if (video.readyState >= video.HAVE_ENOUGH_DATA && video.videoWidth) {
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          let img = null;
+          try { img = ctx.getImageData(0, 0, canvas.width, canvas.height); } catch {}
+          if (img) {
+            const res = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+            const id = res && _parseQrId(res.data);
+            if (id) {
+              stop();
+              status.textContent = 'QR found ✓';
+              _runApproval(id, body, close);
+              return;
+            }
+          }
+        }
+        raf = requestAnimationFrame(tick);
+      };
+
+      navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
+        .then(s => {
+          if (done) { try { s.getTracks().forEach(t => t.stop()); } catch {} return; }
+          stream = s; video.srcObject = s;
+          video.play().catch(() => {});
+          raf = requestAnimationFrame(tick);
+        })
+        .catch(e => {
+          status.textContent = (e && e.name === 'NotAllowedError')
+            ? 'Camera permission denied. Allow camera access, then try again.'
+            : 'Could not open the camera.';
+        });
+    });
+  }
+
   async function loadHomeStats() {
     // Date
     const dateEl = document.getElementById('home-date');
@@ -344,38 +569,57 @@ const App = (() => {
       apiFetch('/api/system').then(r => r.json()).catch(() => null),
     ]);
 
-    // Hero card
+    // Command Deck hero
     const heroEl = document.getElementById('home-hero');
     if (heroEl) {
       const running = agents.filter(a => a.session);
-      if (running.length > 0) {
-        const names = running.map(a => a.name).join(', ');
-        const s = running[0].session;
-        const proj = s?.cwd ? s.cwd.split('/').pop() : '';
-        heroEl.innerHTML = `
-          <div class="news-hero-card">
-            <div class="hero-card-body">
-              <div class="hero-card-eyebrow">● LIVE</div>
-              <div class="hero-card-headline">${running.length} Agent${running.length > 1 ? 's' : ''} Running</div>
-              <div class="hero-card-dek">${esc(names)}${proj ? ' · ' + esc(proj) : ''}</div>
-              <button class="hero-card-cta" id="hero-cta">Open Terminal</button>
-              <div class="hero-card-meta">KAY2 · TAILSCALE CONNECTED</div>
+      const installed = agents.filter(a => a.installed).length;
+      const dirty = projects.filter(p => p.git && p.git.dirty).length;
+      const cpu = sys?.cpu ?? 0;
+      const mem = sys?.mem?.pct ?? 0;
+      const temp = sys?.temp ?? null;
+      const health = temp != null && temp >= 75 ? 'hot' : (cpu >= 85 || mem >= 90 ? 'busy' : 'ready');
+      const healthLabel = health === 'hot' ? 'Thermal watch' : health === 'busy' ? 'Busy' : 'Ready';
+      const lead = running.length
+        ? `${running.length} live agent${running.length > 1 ? 's' : ''} on the Pi`
+        : 'Remote command deck is online';
+      const dek = running.length
+        ? `${esc(running.map(a => a.name).join(', '))}`
+        : 'Launch agents, terminal, files, screen, phone, browser and automations from one app.';
+      heroEl.innerHTML = `
+        <div class="command-deck-card ${health}">
+          <div class="command-deck-bg"></div>
+          <div class="command-deck-top">
+            <div>
+              <div class="deck-eyebrow"><span></span> STANCLI · SPIKERADAR</div>
+              <div class="deck-title">${esc(lead)}</div>
+              <div class="deck-copy">${dek}</div>
             </div>
-          </div>`;
-        document.getElementById('hero-cta')?.addEventListener('click', () => openTerminalForSession(running[0].session.id));
-      } else {
-        heroEl.innerHTML = `
-          <div class="news-hero-card">
-            <div class="hero-card-body">
-              <div class="hero-card-eyebrow">KAY2 TUNNEL</div>
-              <div class="hero-card-headline">Start an Agent</div>
-              <div class="hero-card-dek">Launch Claude Code, Codex, or Gemini to begin a session on this Pi.</div>
-              <button class="hero-card-cta" id="hero-cta">Go to Agents</button>
-              <div class="hero-card-meta">KAY2 · TAILSCALE CONNECTED</div>
+            <div class="deck-orb" aria-label="System health">
+              <b>${esc(healthLabel)}</b>
+              <small>${temp != null ? esc(temp + '°C') : 'Live'}</small>
             </div>
-          </div>`;
-        document.getElementById('hero-cta')?.addEventListener('click', () => showTab('agents'));
-      }
+          </div>
+          <div class="deck-metrics">
+            <div><span>CPU</span><b>${cpu != null ? esc(cpu + '%') : '—'}</b></div>
+            <div><span>MEM</span><b>${mem != null ? esc(mem + '%') : '—'}</b></div>
+            <div><span>AGENTS</span><b>${running.length}/${installed || agents.length || 0}</b></div>
+            <div><span>DIRTY</span><b>${dirty}</b></div>
+          </div>
+          <div class="deck-actions">
+            <button class="deck-btn primary" id="deck-primary">${running.length ? 'Attach live agent' : 'Launch agent'}</button>
+            <button class="deck-btn" id="deck-chat">Chat ↗</button>
+            <button class="deck-btn" data-open="term">Terminal</button>
+            <button class="deck-btn" data-open="screen">Screen</button>
+            <button class="deck-btn" data-open="ops">Automation</button>
+          </div>
+        </div>`;
+      document.getElementById('deck-primary')?.addEventListener('click', () => {
+        if (running[0]?.session?.id) openTerminalForSession(running[0].session.id);
+        else showTab('agents');
+      });
+      heroEl.querySelectorAll('[data-open]').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.open)));
+      document.getElementById('deck-chat')?.addEventListener('click', () => { location.href = '/stanchat/'; });
     }
 
     // Agents list
@@ -533,6 +777,7 @@ const App = (() => {
 
     // More tab navigation
     document.getElementById('more-pi-btn')?.addEventListener('click', () => showTab('pi'));
+    document.getElementById('more-chat-btn')?.addEventListener('click', () => { location.href = '/stanchat/'; });
     document.getElementById('more-browser-btn')?.addEventListener('click', () => showTab('browser'));
     document.getElementById('more-screen-btn')?.addEventListener('click', () => showTab('screen'));
     document.getElementById('more-phone-btn')?.addEventListener('click', () => showTab('phone'));
@@ -540,6 +785,7 @@ const App = (() => {
     document.getElementById('more-claude-btn')?.addEventListener('click', openClaude);
     document.getElementById('more-clipboard-btn')?.addEventListener('click', openClipboard);
     document.getElementById('more-qr-btn')?.addEventListener('click', openDeviceQR);
+    document.getElementById('more-scan-btn')?.addEventListener('click', openQrScanner);
     document.getElementById('more-notif-row')?.addEventListener('click', toggleNotifications);
     document.getElementById('more-split-row')?.addEventListener('click', toggleSplit);
     refreshSplitUI();
@@ -582,11 +828,20 @@ const App = (() => {
       });
     });
 
-    tryHashToken().then(used => {
-      if (used) return;
-      const saved = localStorage.getItem('stan_token');
-      if (saved) { _token = saved; launch(); }
+    // A /#qr=<id> link means this device was asked to APPROVE a desktop sign-in;
+    // show the approval UI instead of auto-launching the app.
+    tryQrApprove().then(isApprove => {
+      if (isApprove) return;
+      tryHashToken().then(used => {
+        if (used) return;
+        const saved = localStorage.getItem('stan_token');
+        if (saved) { _token = saved; launch(); }
+      });
     });
+
+    document.getElementById('qr-login-btn')?.addEventListener('click', startQrLogin);
+    document.getElementById('qr-login-cancel')?.addEventListener('click', cancelQrLogin);
+    document.getElementById('qr-scan-btn')?.addEventListener('click', openQrScanner);
 
     document.getElementById('token-submit').addEventListener('click', tryAuth);
     document.getElementById('token-input').addEventListener('keydown', e => {
@@ -649,6 +904,7 @@ const App = (() => {
   function launch() {
     document.getElementById('auth-screen').classList.add('hidden');
     document.getElementById('app').classList.remove('hidden');
+    document.body.dataset.tab = _activeTab;
     loadHomeStats();
   }
 

@@ -45,8 +45,11 @@ router.get('/read', (req, res) => {
   if (!p) return;
   let stat;
   try { stat = fs.statSync(p); } catch (e) { return res.status(404).json({ error: e.message }); }
+  if (!stat.isFile()) return res.status(400).json({ error: 'Not a file' });
   if (stat.size > MAX_INLINE) return res.status(413).json({ error: 'File too large for inline read; use /download' });
-  res.sendFile(p);
+  res.sendFile(p, (e) => {
+    if (e && !res.headersSent) res.status(e.statusCode || 500).json({ error: e.message });
+  });
 });
 
 router.put('/write', express.json({ limit: '5mb' }), (req, res) => {
@@ -113,8 +116,11 @@ router.post('/upload', upload.single('file'), (req, res) => {
 router.get('/download', (req, res) => {
   const p = jailOrFail(res, req.query.path);
   if (!p) return;
+  let stat;
+  try { stat = fs.statSync(p); } catch (e) { return res.status(404).json({ error: e.message }); }
+  if (!stat.isFile()) return res.status(400).json({ error: 'Not a file' });
   res.download(p, path.basename(p), (e) => {
-    if (e && !res.headersSent) res.status(500).json({ error: e.message });
+    if (e && !res.headersSent) res.status(e.statusCode || 500).json({ error: e.message });
   });
 });
 

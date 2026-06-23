@@ -26,6 +26,8 @@ const Term = (() => {
     { label: 'pm2 status', cmd: 'pm2 status\n' },
     { label: 'npm i', cmd: 'npm install\n' },
     { label: 'claude', cmd: 'claude\n' },
+    { label: 'auto mode', cmd: 'claude --permission-mode auto\n' },
+    { label: 'dangerous auto', cmd: 'claude --dangerously-skip-permissions\n' },
   ];
 
   function getMacros() {

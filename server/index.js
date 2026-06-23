@@ -16,6 +16,7 @@ const piRouter = require('./pi');
 const browserRouter = require('./browser');
 const androidRouter = require('./android');
 const opsRouter = require('./ops');
+const chat = require('./chat');
 const system = require('./system');
 
 const app = express();
@@ -91,6 +92,19 @@ app.use((req, res, next) => {
   next();
 });
 
+// Dedicated Stan Chat subdomain: stanchat.spikeradar.co.uk serves the standalone
+// Claude Code chat PWA at the root, while /api + /ws fall through to this same
+// server. Mirrors the kay2os/macpios host-routing above. Unknown paths (shared
+// /icons, /vendor, /brand) fall through to the general static handler below.
+const STANCHAT_DIR = path.join(__dirname, '../public/stanchat');
+const stanchatStatic = express.static(STANCHAT_DIR, { index: 'index.html' });
+app.use((req, res, next) => {
+  if (req.hostname === 'stanchat.spikeradar.co.uk' && !req.path.startsWith('/api') && !req.path.startsWith('/ws')) {
+    return stanchatStatic(req, res, next);
+  }
+  next();
+});
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 // kay2OS — macOS-style desktop shell (additive, non-breaking). Source of truth
@@ -104,7 +118,13 @@ app.get('/kay2os', (req, res) => res.sendFile('/home/kay2/MacPiOs/kay2os.html'))
 const webauthn = require('./webauthn');
 app.use('/api/webauthn', webauthn.authRouter);
 
+// QR cross-device sign-in. `start` + `poll` are PUBLIC (the desktop has no token
+// yet); `info` + `approve` are gated below (only an authenticated phone approves).
+const qrlogin = require('./qrlogin');
+app.use('/api/qr', qrlogin.publicRouter);
+
 app.use('/api', bearerAuth);
+app.use('/api/qr', qrlogin.approveRouter);
 app.use('/api/webauthn', webauthn.registerRouter);
 app.use('/api/files', filesRouter);
 app.use('/api/ai', aiRouter);
@@ -115,6 +135,7 @@ app.use('/api/pi', piRouter);
 app.use('/api/browser', browserRouter);
 app.use('/api/android', androidRouter);
 app.use('/api/ops', opsRouter);
+app.use('/api/chat', chat.router);
 app.use('/api/push', push.router);
 app.get('/api/system', (req, res) => res.json({ cpu: system.cpu(), mem: system.mem(), load: system.load(), temp: system.temp(), uptime: system.uptime() }));
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
@@ -277,6 +298,8 @@ server.on('upgrade', (req, socket, head) => {
 
   if (req.url.startsWith('/ws/term')) {
     wss.handleUpgrade(req, socket, head, ws => handleWs(ws, req));
+  } else if (req.url.startsWith('/ws/chat')) {
+    wss.handleUpgrade(req, socket, head, ws => chat.handleChatWs(ws, req));
   } else if (req.url.startsWith('/ws/vnc')) {
     wss.handleUpgrade(req, socket, head, ws => handleVncWs(ws));
   } else {
@@ -284,7 +307,61 @@ server.on('upgrade', (req, socket, head) => {
   }
 });
 
-server.listen(PORT, HOST, () => console.log(`Stan CLI v1.0.0 — http://${HOST}:${PORT}`));
+let _shuttingDown = false;
+function bindServer() {
+  if (server.listening) return;
+  server.listen(PORT, HOST, () => {
+    const addr = server.address();
+    console.log(`Stan CLI v4.1 — http://${addr.address}:${addr.port}`);
+  });
+}
+server.on('close', () => {
+  if (_shuttingDown) return;
+  console.error('[server] HTTP listener closed unexpectedly — rebinding in 1s');
+  setTimeout(() => {
+    try { bindServer(); } catch (e) { console.error('[server] rebind failed:', e.message); }
+  }, 1000).unref?.();
+});
+server.on('error', (e) => {
+  console.error('[server] HTTP listener error:', e && e.message ? e.message : e);
+});
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.once(sig, () => {
+    _shuttingDown = true;
+    try { server.close(() => process.exit(0)); } catch { process.exit(0); }
+    setTimeout(() => process.exit(0), 3000).unref?.();
+  });
+}
+bindServer();
+
+// Self-heal the HTTP listener. Rarely, a stale PM2/Node state can report the
+// server as listening while 127.0.0.1:PORT refuses connections; Cloudflare then
+// serves a dead app. Probe loop forces a close+rebind instead of leaving StanCLI
+// looking online-but-unreachable.
+const net = require('net');
+function probeListener() {
+  if (_shuttingDown) return;
+  const sock = net.createConnection({ host: HOST, port: PORT });
+  let ok = false;
+  const done = (healthy) => {
+    if (ok) return; ok = true;
+    try { sock.destroy(); } catch {}
+    if (!healthy && !_shuttingDown) {
+      console.error('[server] probe failed — forcing HTTP listener rebind');
+      try { server.close(() => bindServer()); }
+      catch { try { bindServer(); } catch (e) { console.error('[server] forced rebind failed:', e.message); } }
+      setTimeout(() => { try { bindServer(); } catch {} }, 500).unref?.();
+    }
+  };
+  sock.once('connect', () => done(true));
+  sock.once('error', () => done(false));
+  sock.setTimeout(1200, () => done(false));
+}
+setTimeout(probeListener, 1200).unref?.();
+setInterval(probeListener, 10000).unref?.();
 
 // System monitor — fires push notifications on reboots, phone connect/disconnect, low battery.
 require('./monitor').start();
+
+// Job runner — StanCLI's own scheduled/on-demand automation (Pi ops, phone, clips, Clive).
+require('./jobs').start();

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <title>Stan Chat</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <meta name="theme-color" content="#FF3B5C">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Stan Chat">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="/brand/icon.svg">
+  <link rel="stylesheet" href="/brand/tokens.css">
+  <link rel="stylesheet" href="./chat.css">
+  <script>
+    (function(){var t=localStorage.getItem('stan_theme');if(t==='dark')document.documentElement.dataset.theme='dark';else if(t==='light')document.documentElement.dataset.theme='light';})();
+  </script>
+</head>
+<body>
+
+<!-- ── Auth gate ───────────────────────────────────────── -->
+<div id="auth-screen">
+  <div class="auth-hero">
+    <div class="auth-logo">◉</div>
+    <div class="auth-title">Stan <span>Chat</span></div>
+    <p class="auth-subtitle">Claude Code, as a conversation.</p>
+  </div>
+  <div class="auth-card">
+    <div class="auth-input-wrap">
+      <input id="token-input" type="password" placeholder="Auth token" autocomplete="current-password" spellcheck="false">
+    </div>
+    <button id="token-submit">Connect</button>
+    <p id="auth-error" class="auth-error hidden">Invalid token — check and try again</p>
+    <p class="auth-hint">Same token as Stan CLI · stored on this device only.</p>
+  </div>
+</div>
+
+<!-- ── App ─────────────────────────────────────────────── -->
+<div id="app" class="hidden">
+  <header id="topbar">
+    <button class="icon-btn" id="menu-btn" aria-label="Chats">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+    </button>
+    <div class="topbar-title">
+      <div class="topbar-name" id="chat-name">Stan Chat</div>
+      <div class="topbar-sub" id="chat-status"><span class="status-dot" id="status-dot"></span><span id="status-text">offline</span></div>
+    </div>
+    <button class="icon-btn" id="new-btn" aria-label="New chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+  </header>
+
+  <div id="thread">
+    <div id="empty-state" class="empty-state">
+      <div class="empty-orb">◉</div>
+      <div class="empty-title">Start a Claude Code session</div>
+      <div class="empty-sub">It runs on the kay2 Pi — full repo access, tools, the lot. Ask it to build, fix, explain, or explore.</div>
+      <div class="empty-chips" id="empty-chips"></div>
+    </div>
+  </div>
+
+  <div id="composer">
+    <div id="composer-meta">
+      <button class="meta-chip" id="chip-project"><span class="meta-chip-k">dir</span><span id="chip-project-v">~</span></button>
+      <button class="meta-chip" id="chip-mode"><span class="meta-chip-k">mode</span><span id="chip-mode-v">Plan</span></button>
+      <span class="meta-cost" id="meta-cost"></span>
+    </div>
+    <div id="composer-row">
+      <textarea id="prompt" rows="1" placeholder="Message Claude Code…" spellcheck="false"></textarea>
+      <button id="send-btn" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Sessions / new-chat drawer ──────────────────────── -->
+<div id="drawer" class="hidden">
+  <div class="drawer-scrim" id="drawer-scrim"></div>
+  <div class="drawer-panel">
+    <div class="drawer-head">
+      <span id="drawer-title">Chats</span>
+      <button class="text-btn" id="drawer-close">Done</button>
+    </div>
+    <div id="drawer-body"></div>
+  </div>
+</div>
+
+<script src="./chat.js"></script>
+</body>
+</html>

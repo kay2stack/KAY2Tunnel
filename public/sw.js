@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'stan-cli-v38';
+const CACHE_VERSION = 'stan-cli-v46';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -21,6 +21,7 @@ const SHELL_ASSETS = [
   '/vendor/addon-web-links.js',
   '/vendor/codemirror.js',
   '/vendor/qrcode.js',
+  '/vendor/jsqr.js',
   '/vendor/novnc.js',
   '/vendor/novnc-loader.js',
   '/screen.js',
