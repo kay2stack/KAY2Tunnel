@@ -27,8 +27,31 @@ const { ROOT_DIR } = require('./config');
 // also injected inline as base64 image blocks so Claude *sees* them; every file
 // is saved to disk so Claude can Read it with its tools too.
 const UPLOAD_ROOT = path.join(ROOT_DIR, '.stanchat-uploads');
-const upload = multer({ dest: '/tmp/stan-cli-uploads/', limits: { fileSize: 12 * 1024 * 1024, files: 8 } });
+const upload = multer({ dest: '/tmp/stan-cli-uploads/', limits: { fileSize: 30 * 1024 * 1024, files: 8 } });
 const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+
+// Cross-device-safe move. multer writes to /tmp (tmpfs on the Pi) but UPLOAD_ROOT
+// lives on the SD card — a bare fs.renameSync throws EXDEV there, which silently
+// dropped EVERY attachment (route returned files:[]). Fall back to copy+unlink.
+function moveInto(src, dest) {
+  try { fs.renameSync(src, dest); }
+  catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    fs.copyFileSync(src, dest);
+    try { fs.unlinkSync(src); } catch {}
+  }
+}
+
+// Run multer but turn its errors (esp. LIMIT_FILE_SIZE) into clean JSON instead
+// of Express's default HTML 500 — the HTML made the client's r.json() throw,
+// surfacing as "Attachment failed".
+function attachUpload(req, res, next) {
+  upload.array('files', 8)(req, res, err => {
+    if (!err) return next();
+    const tooBig = err.code === 'LIMIT_FILE_SIZE';
+    res.status(tooBig ? 413 : 400).json({ error: tooBig ? 'File too large (max 30 MB each)' : ('Upload error: ' + (err.message || err.code || 'failed')) });
+  });
+}
 const mediaTypeFor = n => IMAGE_TYPES[path.extname(String(n || '')).toLowerCase()] || null;
 const safeName = n => (String(n || 'file').replace(/[\\/]/g, '_').replace(/[^\w.\- ]/g, '').slice(0, 120) || 'file');
 
@@ -555,7 +578,7 @@ router.delete('/:id', (req, res) => {
 
 // Attach files/photos from a device → saved under UPLOAD_ROOT/<sessionId>/.
 // Returns sanitized descriptors; the client passes these back on the next send.
-router.post('/:id/attach', upload.array('files', 8), (req, res) => {
+router.post('/:id/attach', attachUpload, (req, res) => {
   const s = sessions.get(req.params.id);
   if (!s) { (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch {} }); return res.status(404).json({ error: 'No such chat' }); }
   const dir = path.join(UPLOAD_ROOT, s.id);
@@ -566,9 +589,9 @@ router.post('/:id/attach', upload.array('files', 8), (req, res) => {
     const dest = path.join(dir, nm);
     if (!dest.startsWith(dir + path.sep)) { try { fs.unlinkSync(f.path); } catch {} continue; }
     try {
-      fs.renameSync(f.path, dest);
+      moveInto(f.path, dest);
       files.push({ name: nm, isImage: !!mediaTypeFor(nm), mediaType: mediaTypeFor(nm), size: f.size });
-    } catch { try { fs.unlinkSync(f.path); } catch {} }
+    } catch (e) { console.error('[attach] save failed:', e.code || e.message); try { fs.unlinkSync(f.path); } catch {} }
   }
   res.json({ files });
 });

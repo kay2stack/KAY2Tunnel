@@ -955,8 +955,11 @@
       if (!id) throw new Error('no session');
       const fd = new FormData();
       atts.forEach(a => fd.append('files', a.blob, a.name));
-      const { files } = await api(`/api/chat/${id}/attach`, { method: 'POST', body: fd }).then(r => r.json());
-      const refs = (files || []).map(f => ({ name: f.name, isImage: f.isImage, mediaType: f.mediaType }));
+      const r = await api(`/api/chat/${id}/attach`, { method: 'POST', body: fd });
+      if (!r.ok) { let msg = 'upload failed (' + r.status + ')'; try { msg = (await r.json()).error || msg; } catch {} throw new Error(msg); }
+      const { files } = await r.json();
+      if (!files || !files.length) throw new Error('file was not saved on the Pi');
+      const refs = files.map(f => ({ name: f.name, isImage: f.isImage, mediaType: f.mediaType }));
       if (ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'send', text, attachments: refs }));
       } else {
