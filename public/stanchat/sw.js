@@ -1,6 +1,6 @@
 // Stan Chat — app-shell service worker. Cache-first for the shell, never for
 // /api or WebSockets. Bump CACHE_VERSION on every change.
-const CACHE_VERSION = 'stan-chat-v2';
+const CACHE_VERSION = 'stan-chat-v4';
 const SHELL = [
   './', './index.html', './chat.css', './chat.js', './manifest.webmanifest',
   '/brand/tokens.css', '/brand/icon.svg',

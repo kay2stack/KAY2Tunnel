@@ -1,4 +1,4 @@
-// Stan Chat — standalone Claude Code chat client.
+// Stan Chat — StanAI premium chat client. See ./DESIGN.md.
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
@@ -17,6 +17,8 @@
   let ws = null, wsClosedByUs = false, reconnectDelay = 500;
   let sessionId = null;
   let meta = null;
+  let pendingNew = null;    // one-shot config override for the next forNew connect (quick-auto)
+  let queuedFirst = null;   // first message to fire once a freshly-spawned session is live
   const items = new Map();     // iid -> element
   const toolCards = new Map(); // toolId -> card element
 
@@ -86,10 +88,11 @@
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     let u = `${proto}://${location.host}/ws/chat?token=${encodeURIComponent(token)}`;
     if (forNew) {
-      u += `&name=${encodeURIComponent(cfg.dirLabel)}` +
-           `&cwd=${encodeURIComponent(cfg.dir)}` +
-           `&model=${encodeURIComponent(cfg.model)}` +
-           `&mode=${encodeURIComponent(cfg.mode)}`;
+      const c = pendingNew || cfg;
+      u += `&name=${encodeURIComponent(c.name || c.dirLabel || 'Chat')}` +
+           `&cwd=${encodeURIComponent(c.dir || '')}` +
+           `&model=${encodeURIComponent(c.model || '')}` +
+           `&mode=${encodeURIComponent(c.mode || 'plan')}`;
     } else if (sessionId) {
       u += `&session=${encodeURIComponent(sessionId)}`;
     }
@@ -102,6 +105,7 @@
     wsClosedByUs = false;
     setStatus('connecting');
     ws = new WebSocket(wsUrl(forNew));
+    if (forNew) pendingNew = null;   // consumed into the URL; don't reuse on reconnect
     ws.onopen = () => { reconnectDelay = 500; };
     ws.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch {} };
     ws.onclose = () => {
@@ -118,6 +122,10 @@
       meta = m.meta; sessionId = meta.id;
       localStorage.setItem(LS.last, sessionId);
       renderMeta();
+      if (queuedFirst && ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'send', text: queuedFirst }));
+        queuedFirst = null;
+      }
     } else if (m.type === 'snapshot') {
       clearThread();
       m.transcript.forEach(renderItem);
@@ -147,35 +155,55 @@
       items.set(it.iid, el);
     }
     if (it.t === 'tool_use') return renderTool(el, it);
-    el.className = 'msg ' + it.t + (it.level ? ' ' + it.level : '');
-    const inner = it.t === 'assistant' ? mdToHtml(it.text) + (it.streaming ? '<span class="streaming-caret"></span>' : '')
-                : it.t === 'user'      ? esc(it.text).replace(/\n/g, '<br>')
-                : it.t === 'thinking'  ? '💭 ' + esc(it.text)
-                : esc(it.text);
-    el.innerHTML = `<div class="bubble">${inner}</div>`;
-    if (it.t === 'assistant') wireCopies(el);
+
+    if (it.t === 'assistant') {
+      el.className = 'turn assistant';
+      const caret = it.streaming ? '<span class="streaming-caret"></span>' : '';
+      el.innerHTML =
+        `<div class="turn-avatar"><span class="orb-mini">◉</span></div>` +
+        `<div class="turn-body"><div class="turn-author">Stan</div>` +
+        `<div class="prose">${mdToHtml(it.text)}${caret}</div></div>`;
+      wireCopies(el);
+    } else if (it.t === 'user') {
+      el.className = 'turn user';
+      el.innerHTML = `<div class="user-msg">${esc(it.text).replace(/\n/g, '<br>')}</div>`;
+    } else if (it.t === 'thinking') {
+      el.className = 'turn thinking';
+      el.innerHTML =
+        `<div class="turn-avatar"><span class="orb-mini">◉</span></div>` +
+        `<div class="turn-body"><div class="think">` +
+        `<span class="think-dots"><i></i><i></i><i></i></span>` +
+        `<span class="think-text">${esc(it.text || 'Thinking')}</span></div></div>`;
+    } else { // system
+      el.className = 'turn system' + (it.level ? ' ' + it.level : '');
+      el.innerHTML = `<div class="sys-pill">${esc(it.text)}</div>`;
+    }
   }
 
   function renderTool(el, it) {
-    el.className = 'msg tool';
+    el.className = 'turn tool';
     const st = toolStyle(it.name);
-    el.innerHTML = `
-      <div class="tool-card" data-tool="${esc(it.toolId)}">
-        <div class="tool-head">
-          <div class="tool-badge" style="background:${st.c}">${st.g}</div>
-          <div class="tool-info">
-            <div class="tool-name">${esc(it.name)}</div>
-            ${it.summary ? `<div class="tool-sum">${esc(it.summary)}</div>` : ''}
-          </div>
-          <div class="tool-state run" title="running"></div>
-          <div class="tool-chevron">▸</div>
-        </div>
-        <div class="tool-body">
-          ${Object.keys(it.input || {}).length ? `<div class="tool-input">${esc(prettyInput(it))}</div>` : ''}
-          <pre class="tool-out" style="display:none"></pre>
-        </div>
-      </div>`;
+    el.innerHTML =
+      `<div class="turn-avatar"></div>` +
+      `<div class="turn-body">` +
+      `<div class="tool-card" data-tool="${esc(it.toolId)}">` +
+        `<div class="tool-head">` +
+          `<div class="tool-badge" style="background:${st.c}">${st.g}</div>` +
+          `<div class="tool-info">` +
+            `<div class="tool-name">${esc(it.name)}</div>` +
+            (it.summary ? `<div class="tool-sum">${esc(it.summary)}</div>` : '') +
+          `</div>` +
+          `<span class="tool-dur"></span>` +
+          `<div class="tool-state run" title="running"></div>` +
+          `<div class="tool-chevron">›</div>` +
+        `</div>` +
+        `<div class="tool-body">` +
+          (Object.keys(it.input || {}).length ? `<div class="tool-input">${esc(prettyInput(it))}</div>` : '') +
+          `<pre class="tool-out" style="display:none"></pre>` +
+        `</div>` +
+      `</div></div>`;
     const card = el.querySelector('.tool-card');
+    card._t0 = Date.now();
     toolCards.set(it.toolId, card);
     card.querySelector('.tool-head').addEventListener('click', () => card.classList.toggle('open'));
   }
@@ -195,6 +223,8 @@
     const state = card.querySelector('.tool-state');
     state.className = 'tool-state ' + (it.isError ? 'err' : 'ok');
     state.title = it.isError ? 'error' : 'done';
+    const dt = Date.now() - (card._t0 || 0);
+    if (dt >= 120 && dt < 6e5) card.querySelector('.tool-dur').textContent = (dt / 1000).toFixed(1) + 's';
     const out = card.querySelector('.tool-out');
     if (it.text && it.text.trim()) {
       out.textContent = it.text;
@@ -227,27 +257,58 @@
   function scrollDown(force) {
     const t = $('thread');
     if (force || (t.scrollHeight - t.scrollTop - t.clientHeight) < 200) {
-      requestAnimationFrame(() => { t.scrollTop = t.scrollHeight; });
+      requestAnimationFrame(() => { t.scrollTop = t.scrollHeight; updateJump(); });
     }
   }
+  function updateJump() {
+    const t = $('thread'), b = $('jump-btn'); if (!b) return;
+    const far = (t.scrollHeight - t.scrollTop - t.clientHeight) > 280;
+    b.classList.toggle('show', far);
+  }
 
-  // ── tiny markdown ─────────────────────────────────────
-  function mdToHtml(src) {
-    src = String(src || '');
-    const blocks = [];
-    src = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, code) => {
-      const i = blocks.push(`<pre><button class="copy" data-code="${esc(code)}">Copy</button><code>${esc(code)}</code></pre>`) - 1;
-      return ` ${i} `;
-    });
-    let html = esc(src)
+  // ── markdown ──────────────────────────────────────────
+  // Block-level parser: headings, lists, blockquotes, rules, language-labelled
+  // code blocks, plus inline code/bold/em/links. Tolerant of partial (streaming)
+  // input — an unclosed ``` fence simply renders as text until it closes.
+  function inlineMd(s) {
+    return esc(s)
       .replace(/`([^`]+)`/g, '<code class="inline">$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
-      .replace(/^### (.*)$/gm, '<strong>$1</strong>')
-      .replace(/^## (.*)$/gm, '<strong>$1</strong>')
-      .replace(/\n/g, '<br>');
-    html = html.replace(/ (\d+) /g, (_, i) => blocks[+i]);
-    return html;
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  }
+  function renderCode(c) {
+    if (!c) return '';
+    const lang = `<span class="code-lang">${esc(c.lang || 'code')}</span>`;
+    return `<div class="codeblock"><div class="code-bar">${lang}` +
+      `<button class="copy" data-code="${esc(c.body)}">Copy</button></div>` +
+      `<pre><code>${esc(c.body)}</code></pre></div>`;
+  }
+  function mdToHtml(src) {
+    src = String(src || '');
+    const code = [];
+    src = src.replace(/```(\w*)\n?([\s\S]*?)```/g, (_, lang, body) => {
+      const i = code.push({ lang, body: body.replace(/\n$/, '') }) - 1;
+      return ` ${i} `;
+    });
+    const out = [];
+    let para = [], list = null;
+    const closeList = () => { if (list) { out.push(`<${list.type} class="md-list">${list.items.map(x => `<li>${x}</li>`).join('')}</${list.type}>`); list = null; } };
+    const closePara = () => { if (para.length) { out.push(`<p>${para.join('<br>')}</p>`); para = []; } };
+    for (const line of src.split('\n')) {
+      let m;
+      if ((m = line.match(/^ (\d+) $/))) { closePara(); closeList(); out.push(renderCode(code[+m[1]])); continue; }
+      if (/^\s*$/.test(line)) { closePara(); closeList(); continue; }
+      if ((m = line.match(/^\s*[-*]\s+(.*)/))) { closePara(); if (!list || list.type !== 'ul') { closeList(); list = { type: 'ul', items: [] }; } list.items.push(inlineMd(m[1])); continue; }
+      if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { closePara(); if (!list || list.type !== 'ol') { closeList(); list = { type: 'ol', items: [] }; } list.items.push(inlineMd(m[1])); continue; }
+      closeList();
+      if ((m = line.match(/^(#{1,3})\s+(.*)/))) { closePara(); const l = m[1].length; out.push(`<div class="md-h md-h${l}">${inlineMd(m[2])}</div>`); continue; }
+      if ((m = line.match(/^>\s?(.*)/))) { closePara(); out.push(`<blockquote>${inlineMd(m[1])}</blockquote>`); continue; }
+      if (/^\s*([-*_])\1{2,}\s*$/.test(line)) { closePara(); out.push('<hr class="md-hr">'); continue; }
+      para.push(inlineMd(line));
+    }
+    closePara(); closeList();
+    return out.join('');
   }
   function wireCopies(scope) {
     scope.querySelectorAll('.copy').forEach(b => b.addEventListener('click', () => {
@@ -256,11 +317,33 @@
     }));
   }
 
+  // ── Quick auto session ────────────────────────────────
+  // Spin up a brand-new autopilot (bypassPermissions) chat in one tap, reusing
+  // the last project/model — no drawer round-trip. Optionally fire a first
+  // message the instant the session is live.
+  function startAuto(firstMessage) {
+    pendingNew = {
+      mode: 'bypassPermissions',
+      model: cfg.model,
+      dir: cfg.dir,
+      dirLabel: cfg.dirLabel,
+      name: '⚡ ' + (cfg.dirLabel || 'Home'),
+    };
+    queuedFirst = (firstMessage || '').trim() || null;
+    sessionId = null;
+    clearThread();
+    closeDrawer();
+    connect(true);
+  }
+
   // ── Composer ──────────────────────────────────────────
   function send() {
     const ta = $('prompt');
     const text = ta.value.trim();
     if (!text) return;
+    // /auto [message] → launch a fresh autopilot session (and send the message)
+    const cmd = text.match(/^\/auto\b[ \t]*([\s\S]*)$/i);
+    if (cmd) { ta.value = ''; autoGrow(ta); startAuto(cmd[1]); return; }
     if (!ws || ws.readyState !== 1) { connect(!sessionId); setTimeout(send, 400); return; }
     ws.send(JSON.stringify({ type: 'send', text }));
     ta.value = ''; autoGrow(ta);
@@ -386,10 +469,14 @@
     });
     $('menu-btn').addEventListener('click', () => openDrawer('sessions'));
     $('new-btn').addEventListener('click', () => openDrawer('new'));
+    $('bolt-btn').addEventListener('click', () => startAuto());
+    const ea = $('empty-auto'); if (ea) ea.addEventListener('click', () => startAuto());
     $('drawer-close').addEventListener('click', closeDrawer);
     $('drawer-scrim').addEventListener('click', closeDrawer);
     $('chip-mode').addEventListener('click', () => openDrawer('new'));
     $('chip-project').addEventListener('click', () => openDrawer('new'));
+    $('thread').addEventListener('scroll', updateJump, { passive: true });
+    const jb = $('jump-btn'); if (jb) jb.addEventListener('click', () => scrollDown(true));
 
     if (token) tryToken(token).then(ok => ok ? boot() : showAuth());
     else showAuth();
