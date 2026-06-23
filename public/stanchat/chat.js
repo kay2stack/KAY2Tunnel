@@ -199,6 +199,8 @@
     } else if (m.type === 'status') {
       if (meta) { meta.status = m.status; if (m.lastResult) meta.lastResult = m.lastResult; }
       if (m.status === 'exited' && stoppedByUs) sysPill('Stopped — send a message to resume.');
+      if (m.status === 'thinking') showTyping(); else hideTyping();
+      if (typeof m.liveTokens === 'number') renderLiveTokens(m.liveTokens);
       renderMeta();
       if (m.lastResult) renderCost(m.lastResult);
       if (m.status === 'idle') fetchUsage();   // a turn just burned plan budget — refresh the bar
@@ -219,9 +221,23 @@
       `<div class="empty-hint">or type <code>/auto</code> in the box to launch one instantly</div>` +
       `<div class="empty-chips" id="empty-chips"></div>` +
     `</div>`;
-  function clearThread() { items.clear(); toolCards.clear(); $('thread').innerHTML = ''; showEmpty(); }
+  function clearThread() { items.clear(); toolCards.clear(); $('thread').innerHTML = ''; hideTyping(); showEmpty(); }
 
   function hideEmpty() { const e = $('empty-state'); if (e) e.remove(); }
+
+  // ── Typing bubble — Stan "is typing" between turn-start and first token ────
+  function showTyping() {
+    const t = $('thread'); if (!t || $('typing-turn')) return;
+    hideEmpty();
+    const d = document.createElement('div');
+    d.id = 'typing-turn'; d.className = 'turn assistant typing';
+    d.innerHTML = `<div class="turn-avatar"><span class="orb-mini">◉</span></div>` +
+      `<div class="turn-body"><div class="turn-author">Stan</div>` +
+      `<div class="typing-dots"><i></i><i></i><i></i></div></div>`;
+    t.appendChild(d);
+    if (stick) t.scrollTop = t.scrollHeight;
+  }
+  function hideTyping() { const e = $('typing-turn'); if (e) e.remove(); }
   // (Re)mount the welcome orb whenever the thread holds no real turns. Idempotent,
   // and re-wires its controls (starter chips + quick-auto) each call since the
   // node is freshly minted.
@@ -234,7 +250,7 @@
 
   function renderItem(it) {
     if (it.t === 'tool_result') return attachResult(it);
-    hideEmpty();
+    hideEmpty(); hideTyping();
     let el = items.get(it.iid);
     if (!el) {
       el = document.createElement('div');
@@ -389,10 +405,25 @@
     haptic(22);
     try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'kill' })); } catch {}
   }
+  const fmtTok = n => (n == null ? '' : n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n));
   function renderCost(lr) {
-    if (!lr || lr.costUsd == null) return;
-    const sec = lr.durationMs ? (lr.durationMs / 1000).toFixed(1) + 's' : '';
-    $('meta-cost').textContent = `$${lr.costUsd.toFixed(4)} · ${sec}`;
+    if (!lr) return;
+    const el = $('meta-cost'); if (!el) return;
+    const parts = [];
+    const u = lr.usage || {};
+    const out = u.output_tokens, inp = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    if (out != null) parts.push(`${fmtTok(inp)}↑ ${fmtTok(out)}↓`);
+    if (lr.costUsd != null) parts.push(`$${lr.costUsd.toFixed(4)}`);
+    if (lr.durationMs) parts.push((lr.durationMs / 1000).toFixed(1) + 's');
+    el.classList.remove('live');
+    el.textContent = parts.join(' · ');
+  }
+  // Live running output-token counter while a turn is being built (server streams
+  // m.liveTokens on status frames). Cleared/overwritten by the final renderCost.
+  function renderLiveTokens(n) {
+    const el = $('meta-cost'); if (!el) return;
+    el.classList.add('live');
+    el.textContent = `${fmtTok(n)} tok · building…`;
   }
 
   // ── Claude Max-plan usage ─────────────────────────────────────────────────
@@ -559,6 +590,128 @@
     } catch { sysPill('Transcription failed', 'error'); }
     finally { mic.classList.remove('busy'); mic.disabled = false; }
   }
+
+  // ── Slash commands ────────────────────────────────────────────────────────
+  // StanChat's own command layer — Claude's TUI /commands (/models, /clear…)
+  // aren't available over stream-json, so these are native: typing "/" opens a
+  // palette; a recognised command runs locally and never reaches Claude.
+  const SLASH = [
+    { c: 'help',     d: 'Show all commands',               run: () => slashHelp() },
+    { c: 'auto',     a: '[task]',     d: 'Launch an autopilot session', run: a => startAuto(a) },
+    { c: 'new',      d: 'Start a new chat',                run: () => openDrawer('new') },
+    { c: 'models',   d: 'Switch model for the next turn',  run: () => slashModels() },
+    { c: 'usage',    d: 'Claude plan usage',               run: () => openDrawer('usage') },
+    { c: 'sessions', d: 'All chats',                       run: () => openDrawer('sessions') },
+    { c: 'settings', d: 'Settings',                        run: () => openDrawer('settings') },
+    { c: 'pet',      d: 'Toggle the Stan mascot',          run: () => togglePet() },
+    { c: 'btw',      a: '<question>', d: 'Quick aside to Stan', run: a => sendBtw(a) },
+    { c: 'stop',     d: 'Stop the current turn',           run: () => stopGen() },
+    { c: 'clear',    d: 'Clear this view (keeps context)', run: () => clearThread() },
+  ];
+  // Returns true if the text was a recognised command (so send() doesn't ship it).
+  function runSlash(text) {
+    const m = text.match(/^\/(\w+)\b[ \t]*([\s\S]*)$/);
+    if (!m) return false;
+    const cmd = SLASH.find(s => s.c === m[1].toLowerCase());
+    if (!cmd) return false;
+    hideSlashMenu(); haptic(8); cmd.run((m[2] || '').trim());
+    return true;
+  }
+  function slashHelp() {
+    const rows = SLASH.map(s => `<div class="cmd-row"><code>/${s.c}${s.a ? ' ' + esc(s.a) : ''}</code><span>${esc(s.d)}</span></div>`).join('');
+    sysCard(`<div class="cmd-help-h">Commands</div>${rows}`);
+  }
+  function slashModels() {
+    const rows = MODELS.map(m => `<button class="opt" data-sm="${esc(m.v)}">${esc(m.label)}${cfg.model === m.v ? ' ✓' : ''}</button>`).join('');
+    const card = sysCard(`<div class="cmd-help-h">Model — next message onward</div><div class="opt-grid">${rows}</div>`);
+    card.querySelectorAll('[data-sm]').forEach(b => b.addEventListener('click', () => switchModel(b.dataset.sm)));
+  }
+  function switchModel(v) {
+    cfg.model = v; localStorage.setItem(LS.model, v);
+    try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'setModel', model: v })); } catch {}
+    sysPill('Model → ' + ((MODELS.find(m => m.v === v) || {}).label || v)); haptic(10);
+  }
+  function sendBtw(q) {
+    if (!q) { const ta = $('prompt'); ta.value = '/btw '; ta.focus(); autoGrow(ta); return; }
+    deliverText('By the way — ' + q);
+  }
+  // Send arbitrary text over the live socket as if typed (slash helpers / pet).
+  function deliverText(text) {
+    if (!text) return;
+    stoppedByUs = false;
+    if (!ws || ws.readyState !== 1) { connect(!sessionId); setTimeout(() => deliverText(text), 400); return; }
+    ws.send(JSON.stringify({ type: 'send', text }));
+  }
+  // A richer-than-a-pill system card in the thread (command help, model list…).
+  function sysCard(html) {
+    const t = $('thread'); if (!t) return document.createElement('div');
+    hideEmpty();
+    const d = document.createElement('div');
+    d.className = 'turn system'; d.innerHTML = `<div class="sys-card">${html}</div>`;
+    t.appendChild(d); scheduleFlush();
+    return d;
+  }
+
+  // ── Slash palette (autocomplete over the composer) ────────────────────────
+  function updateSlashMenu() {
+    const menu = $('slash-menu'); if (!menu) return;
+    const m = $('prompt').value.match(/^\/(\w*)$/);   // only while typing the command word
+    const matches = m ? SLASH.filter(s => s.c.startsWith(m[1].toLowerCase())) : [];
+    if (!matches.length) { hideSlashMenu(); return; }
+    menu.innerHTML = matches.map(s => `<button class="slash-row" data-c="${s.c}"><code>/${s.c}${s.a ? ' ' + esc(s.a) : ''}</code><span>${esc(s.d)}</span></button>`).join('');
+    menu.querySelectorAll('[data-c]').forEach(b => b.addEventListener('click', () => pickSlash(b.dataset.c)));
+    menu.classList.add('show');
+  }
+  function hideSlashMenu() { const m = $('slash-menu'); if (m) m.classList.remove('show'); }
+  function pickSlash(c) {
+    const cmd = SLASH.find(s => s.c === c); if (!cmd) return;
+    const ta = $('prompt');
+    hideSlashMenu();
+    if (cmd.a) { ta.value = '/' + c + ' '; ta.focus(); autoGrow(ta); updateSendDim(); }
+    else { ta.value = ''; autoGrow(ta); updateSendDim(); haptic(8); cmd.run(''); }
+  }
+
+  // ── /pet — an ASCII Stan mascot that lives in the chat ────────────────────
+  const PET_FACE = ['.----.', '|o  o|', "'-__-'"].join('\n');
+  const PET_BIG = ['   .------.', '  |  o  o |', '  |   __   |', "   '------'", '    S T A N'].join('\n');
+  const PET_MOODS = ['watching the tools fly by…', 'ready when you are.', 'this repo has good bones.',
+    'beep — all systems go.', 'ask me anything, even a /btw.', 'the Pi is warm and happy.', 'I never sleep.'];
+  let petOn = localStorage.getItem('stanchat_pet') === '1';
+  function togglePet(force) {
+    petOn = force != null ? force : !petOn;
+    localStorage.setItem('stanchat_pet', petOn ? '1' : '0');
+    renderPet(); haptic(8);
+  }
+  function renderPet() {
+    const app = $('app'); if (!app) return;
+    let pet = $('stan-pet');
+    if (!petOn) { if (pet) pet.remove(); closePetPop(); return; }
+    if (pet) return;
+    pet = document.createElement('button');
+    pet.id = 'stan-pet'; pet.className = 'stan-pet'; pet.setAttribute('aria-label', 'Stan');
+    pet.innerHTML = `<pre class="pet-face">${PET_FACE}</pre>`;
+    app.appendChild(pet);
+    pet.addEventListener('click', togglePetPop);
+  }
+  function petMood() { return PET_MOODS[Math.floor(Math.random() * PET_MOODS.length)]; }
+  function togglePetPop() {
+    if ($('pet-pop')) return closePetPop();
+    const app = $('app'); if (!app) return;
+    const pop = document.createElement('div');
+    pop.id = 'pet-pop'; pop.className = 'pet-pop';
+    pop.innerHTML =
+      `<pre class="pet-big">${PET_BIG}</pre>` +
+      `<div class="pet-mood">“${esc(petMood())}”</div>` +
+      `<div class="pet-btw"><input id="pet-btw-in" placeholder="Ask a /btw aside…" autocomplete="off" spellcheck="false"><button id="pet-btw-go">Ask</button></div>` +
+      `<button class="pet-x" id="pet-x">dismiss</button>`;
+    app.appendChild(pop);
+    const go = () => { const q = $('pet-btw-in').value.trim(); if (q) { sendBtw(q); closePetPop(); } };
+    $('pet-btw-go').addEventListener('click', go);
+    $('pet-btw-in').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+    $('pet-x').addEventListener('click', closePetPop);
+    setTimeout(() => $('pet-btw-in') && $('pet-btw-in').focus(), 30);
+  }
+  function closePetPop() { const p = $('pet-pop'); if (p) p.remove(); }
 
   // One rAF that paints any queued streaming prose AND follows the bottom — at
   // most once per frame no matter how many deltas arrived, and only scrolling
@@ -779,11 +932,15 @@
     // /auto launches a fresh autopilot session — but only when sending plain
     // text; with attachments staged we just deliver them to the current chat.
     if (!pending.length) {
-      const cmd = text.match(/^\/auto\b[ \t]*([\s\S]*)$/i);
-      if (cmd) { ta.value = ''; autoGrow(ta); startAuto(cmd[1]); return; }
+      // Slash command? Run it locally and don't ship it to Claude. If the command
+      // repopulated the box (e.g. /btw with no arg), leave that; else clear.
+      if (text[0] === '/' && runSlash(text)) {
+        if ($('prompt').value === text) { ta.value = ''; autoGrow(ta); updateSendDim(); }
+        return;
+      }
       if (!ws || ws.readyState !== 1) { connect(!sessionId); setTimeout(send, 400); return; }
       ws.send(JSON.stringify({ type: 'send', text }));
-      ta.value = ''; autoGrow(ta);
+      ta.value = ''; autoGrow(ta); updateSendDim(); hideSlashMenu();
       return;
     }
 
@@ -1152,6 +1309,7 @@
     updateSendDim();
     startUsagePoll();
     initVoice();
+    renderPet();
   }
 
   function init() {
@@ -1161,7 +1319,8 @@
     $('send-btn').addEventListener('click', () => {
       if ($('send-btn').classList.contains('stop')) stopGen(); else send();
     });
-    $('prompt').addEventListener('input', e => { autoGrow(e.target); updateSendDim(); });
+    $('prompt').addEventListener('input', e => { autoGrow(e.target); updateSendDim(); updateSlashMenu(); });
+    $('prompt').addEventListener('blur', () => setTimeout(hideSlashMenu, 150));
     $('theme-btn').addEventListener('click', cycleTheme);
     renderThemeBtn();
     $('prompt').addEventListener('keydown', e => {
@@ -1270,6 +1429,7 @@
     </button>
     <div id="composer">
       <div id="composer-inner">
+        <div id="slash-menu"></div>
         <div id="composer-meta">
           <button class="meta-chip" id="chip-project"><span class="meta-chip-k">dir</span><span id="chip-project-v">~</span></button>
           <button class="meta-chip" id="chip-mode"><span class="meta-chip-k">mode</span><span id="chip-mode-v">Plan</span></button>
