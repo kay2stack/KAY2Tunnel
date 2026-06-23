@@ -119,7 +119,7 @@ a:active { opacity: .7; }
 /* ════════ Thread (the reading column) ════════════════════════════ */
 #thread {
   flex: 1; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch;
-  scroll-behavior: smooth;
+  overflow-anchor: none;   /* we manage bottom-follow ourselves; let the browser not fight it */
   padding: 18px 0 26px;
   display: flex; flex-direction: column; gap: 22px;
 }
@@ -506,6 +506,92 @@ a:active { opacity: .7; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .fleet-card-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: 9px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+
+/* ════════ Markdown tables ════════════════════════════════════════ */
+.prose .md-tablewrap {
+  overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 12px 0;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.prose .md-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.prose .md-table th, .prose .md-table td {
+  padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border);
+  white-space: nowrap; vertical-align: top;
+}
+.prose .md-table th { background: var(--bg-secondary); color: var(--text-primary); font-weight: 700; font-size: 12.5px; }
+.prose .md-table td { color: var(--text-secondary); }
+.prose .md-table tr:last-child td { border-bottom: none; }
+.prose .md-table code.inline { white-space: normal; }
+
+/* ── Task-list checkboxes (- [ ] / - [x]) ── */
+.prose .checklist { list-style: none; padding-left: 2px; margin: 6px 0 12px; }
+.prose .checklist li { margin: 4px 0; }
+.prose .md-task { display: flex; align-items: flex-start; gap: 9px; }
+.prose .md-check {
+  width: 17px; height: 17px; border-radius: 5px; flex-shrink: 0; margin-top: 1px;
+  border: 1.5px solid var(--border-mid); position: relative;
+}
+.prose .md-task.done .md-check { background: var(--green); border-color: var(--green); }
+.prose .md-task.done .md-check::after { content: '✓'; position: absolute; inset: 0; color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
+.prose .md-task.done > span { color: var(--text-dim); text-decoration: line-through; }
+
+/* ════════ Send-button states (Stop while working · dim while empty) ═ */
+#send-btn.stop { background: var(--accent); }
+#send-btn.stop:active { background: var(--accent-press); }
+#send-btn.stop svg { width: 22px; height: 22px; }
+#send-btn.send-idle { opacity: 0.4; }
+
+/* ════════ Drawer theme toggle ════════════════════════════════════ */
+.drawer-head .icon-sm {
+  width: 36px; height: 36px; border-radius: 10px; border: none; flex-shrink: 0;
+  background: var(--bg-secondary); color: var(--text-secondary); margin-right: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast);
+}
+.drawer-head .icon-sm svg { width: 19px; height: 19px; }
+.drawer-head .icon-sm:active { transform: scale(0.9); background: var(--accent-dim); color: var(--accent); }
+
+/* ════════ Chats drawer — search · sections · previews ════════════ */
+.sess-search-wrap { padding: 4px 2px 10px; position: sticky; top: 0; z-index: 1; background: var(--bg-card); }
+.sess-search {
+  width: 100%; padding: 11px 14px; font-size: 15px; font-family: inherit;
+  background: var(--bg-input); border: 1.5px solid var(--border); border-radius: var(--r-md);
+  color: var(--text-primary); outline: none; transition: border-color var(--dur-fast), box-shadow var(--dur-fast);
+}
+.sess-search:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); }
+.sess-search::placeholder { color: var(--text-dim); }
+
+.sess-section-h {
+  display: flex; align-items: center; gap: 8px; margin: 14px 4px 9px;
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-dim);
+}
+.sess-section-h::before { content: ''; width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.sess-section-h.live::before { background: var(--green); box-shadow: 0 0 0 3px var(--green-bg); }
+.sess-section-h.off::before { background: var(--text-dim); }
+.sess-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--bg-secondary); color: var(--text-dim);
+  font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center;
+}
+.sess-clear { margin-left: auto; background: none; border: none; color: var(--accent); font-size: 12.5px; font-weight: 600; padding: 4px 2px; text-transform: none; letter-spacing: 0; }
+.sess-clear:active { opacity: .6; }
+.sess-clear:disabled { color: var(--text-dim); }
+
+.sess-icon.off { background: var(--bg-secondary); color: var(--text-dim); box-shadow: none; }
+.sess-dir { color: var(--text-dim); font-weight: 400; }
+.sess-meta .status-dot { display: inline-block; vertical-align: middle; margin-right: 6px; }
+.sess-prev {
+  font-size: 12px; color: var(--text-secondary); margin-top: 4px; line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.sess-row.cur { border: 1.5px solid var(--accent); background: var(--accent-dim); }
+.sess-row.cur .sess-icon { box-shadow: 0 0 0 2px var(--accent-dim); }
+
+/* full-width / destructive option buttons in the Settings sheet */
+.opt.wide { width: 100%; justify-content: center; display: flex; }
+.opt.danger { color: var(--red); border-color: var(--red-bg); }
+.opt.danger:active { background: var(--red-bg); }
+.opt.danger:disabled { opacity: .5; }
 
 /* ════════ Wide screens ═══════════════════════════════════════════ */
 @media (min-width: 760px) {

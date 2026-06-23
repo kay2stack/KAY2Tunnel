@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'stan-cli-v47';
+const CACHE_VERSION = 'stan-cli-v49';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
@@ -27,6 +27,7 @@ const SHELL_ASSETS = [
   '/screen.js',
   '/phone.js',
   '/ops.js',
+  '/chatpane.js',
   '/shell.js',
   '/icons/icon-192.png',
   '/icons/icon-512.png',

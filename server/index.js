@@ -312,7 +312,7 @@ function bindServer() {
   if (server.listening) return;
   server.listen(PORT, HOST, () => {
     const addr = server.address();
-    console.log(`Stan CLI v4.1 — http://${addr.address}:${addr.port}`);
+    console.log(`Stan CLI v4.2 — http://${addr.address}:${addr.port}`);
   });
 }
 server.on('close', () => {

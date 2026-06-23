@@ -1,7 +1,15 @@
 // Stan Chat — StanAI premium chat client. See ./DESIGN.md.
+//
+// ONE codebase, TWO surfaces (the Stan ecosystem unification):
+//   • standalone StanChat PWA  — auto-mounts when <body data-stanchat-standalone>.
+//   • native Chat tab in Stan CLI — the cockpit calls StanChat.mount({root: shadowRoot})
+//     so this exact UI renders inside the cockpit (Shadow DOM = zero CSS collisions).
+// `$` queries a configurable root (document, or a ShadowRoot when embedded).
 (() => {
   'use strict';
-  const $ = id => document.getElementById(id);
+  let _root = document;        // document (standalone) | ShadowRoot (embedded)
+  let _standalone = true;
+  const $ = id => _root.getElementById(id);
   const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   const LS = {
@@ -14,7 +22,8 @@
   };
 
   let token = localStorage.getItem(LS.token) || '';
-  let ws = null, wsClosedByUs = false, reconnectDelay = 500;
+  let ws = null, reconnectDelay = 500, connTimer = 0;
+  let stoppedByUs = false;  // true between a user-triggered Stop and the next send
   let sessionId = null;
   let meta = null;
   let pendingNew = null;    // one-shot config override for the next forNew connect (quick-auto)
@@ -25,6 +34,11 @@
   const fanDirs = new Set();// fan-out: selected target dirs
   const items = new Map();     // iid -> element
   const toolCards = new Map(); // toolId -> card element
+  // Scroll model: follow the live feed ONLY while the reader is pinned to the
+  // bottom. The instant they scroll up to read, stop dragging them down.
+  let stick = true;
+  const pendingStream = new Map(); // el -> latest assistant item (coalesced per frame)
+  let flushRaf = 0;
 
   // new-chat config (persisted)
   let cfg = {
@@ -62,9 +76,46 @@
   };
   const toolStyle = n => TOOL_STYLE[n] || { g: '⚙', c: '#8E8E93' };
 
+  // ── Icons & little helpers ────────────────────────────
+  const SEND_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>';
+  const STOP_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg>';
+  const ICON_SUN  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.3"/><line x1="12" y1="2.5" x2="12" y2="4.5"/><line x1="12" y1="19.5" x2="12" y2="21.5"/><line x1="2.5" y1="12" x2="4.5" y2="12"/><line x1="19.5" y1="12" x2="21.5" y2="12"/><line x1="5.2" y1="5.2" x2="6.6" y2="6.6"/><line x1="17.4" y1="17.4" x2="18.8" y2="18.8"/><line x1="5.2" y1="18.8" x2="6.6" y2="17.4"/><line x1="17.4" y1="6.6" x2="18.8" y2="5.2"/></svg>';
+  const ICON_MOON = '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.6 6.6 0 0 0 9.8 9.8z"/></svg>';
+  const ICON_AUTO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>';
+
+  const haptic = ms => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+
+  // ── Theme (system → light → dark) — finishes the wired-but-hidden toggle ──
+  const THEMES = ['system', 'light', 'dark'];
+  const themeNow = () => localStorage.getItem('stan_theme') || 'system';
+  function applyTheme(t) {
+    if (t === 'dark') document.documentElement.dataset.theme = 'dark';
+    else if (t === 'light') document.documentElement.dataset.theme = 'light';
+    else delete document.documentElement.dataset.theme;
+  }
+  function renderThemeBtn() {
+    const b = $('theme-btn'); if (!b) return;
+    const t = themeNow();
+    b.innerHTML = t === 'dark' ? ICON_MOON : t === 'light' ? ICON_SUN : ICON_AUTO;
+    b.title = 'Theme: ' + t;
+  }
+  function cycleTheme() {
+    const t = THEMES[(THEMES.indexOf(themeNow()) + 1) % THEMES.length];
+    if (t === 'system') localStorage.removeItem('stan_theme'); else localStorage.setItem('stan_theme', t);
+    applyTheme(t); renderThemeBtn(); haptic(8);
+  }
+
+  function sysPill(text, level) {
+    const t = $('thread'); if (!t) return;
+    const d = document.createElement('div');
+    d.className = 'turn system' + (level ? ' ' + level : '');
+    d.innerHTML = `<div class="sys-pill">${esc(text)}</div>`;
+    t.appendChild(d); scheduleFlush();
+  }
+
   // ── Auth ──────────────────────────────────────────────
-  function showAuth() { $('auth-screen').classList.remove('hidden'); $('app').classList.add('hidden'); }
-  function showApp() { $('auth-screen').classList.add('hidden'); $('app').classList.remove('hidden'); }
+  function showAuth() { const a = $('auth-screen'), p = $('app'); if (a) a.classList.remove('hidden'); if (p) p.classList.add('hidden'); }
+  function showApp() { const a = $('auth-screen'), p = $('app'); if (a) a.classList.add('hidden'); if (p) p.classList.remove('hidden'); }
 
   async function tryToken(t) {
     const r = await fetch('/api/chat', { headers: { Authorization: 'Bearer ' + t } });
@@ -103,28 +154,33 @@
     return u;
   }
 
+  // Reconnect with an identity guard. When we replace the socket, the OLD
+  // socket's async onclose must NOT schedule another reconnect — that race (the
+  // close-flag was reset before onclose fired) spawned duplicate sockets and was
+  // the root cause of the offline/working flicker. Every handler compares its own
+  // socket to the current `ws` and bails if it has been superseded.
   function connect(forNew) {
-    wsClosedByUs = true;
-    if (ws) { try { ws.close(); } catch {} }
-    wsClosedByUs = false;
-    setStatus('connecting');
-    ws = new WebSocket(wsUrl(forNew));
+    if (ws) { try { ws.onopen = ws.onmessage = ws.onclose = ws.onerror = null; ws.close(); } catch {} }
+    setConn('connecting');
+    const sock = new WebSocket(wsUrl(forNew));
+    ws = sock;
     if (forNew) pendingNew = null;   // consumed into the URL; don't reuse on reconnect
-    ws.onopen = () => { reconnectDelay = 500; };
-    ws.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch {} };
-    ws.onclose = () => {
-      if (wsClosedByUs) return;
-      setStatus('offline');
-      setTimeout(() => connect(false), reconnectDelay);
+    sock.onopen = () => { if (ws !== sock) return; reconnectDelay = 500; setConn('open'); };
+    sock.onmessage = e => { if (ws !== sock) return; try { onMsg(JSON.parse(e.data)); } catch {} };
+    sock.onclose = () => {
+      if (ws !== sock) return;       // superseded by a newer socket — ignore
+      setConn('offline');
+      setTimeout(() => { if (ws === sock) connect(false); }, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 2, 8000);
     };
-    ws.onerror = () => { try { ws.close(); } catch {} };
+    sock.onerror = () => { if (ws === sock) { try { sock.close(); } catch {} } };
   }
 
   function onMsg(m) {
     if (m.type === 'meta') {
       meta = m.meta; sessionId = meta.id;
       localStorage.setItem(LS.last, sessionId);
+      clearTimeout(connTimer);   // live now — cancel any pending "reconnecting…" paint
       renderMeta();
       if (awaitMeta) { const r = awaitMeta; awaitMeta = null; r(sessionId); }
       if (queuedFirst && ws && ws.readyState === 1) {
@@ -133,13 +189,15 @@
       }
     } else if (m.type === 'snapshot') {
       clearThread();
+      stick = true;                       // a fresh thread always opens at the bottom
       m.transcript.forEach(renderItem);
-      scrollDown(true);
+      scheduleFlush();
     } else if (m.type === 'item') {
       renderItem(m.item);
-      scrollDown();
+      scheduleFlush();
     } else if (m.type === 'status') {
       if (meta) { meta.status = m.status; if (m.lastResult) meta.lastResult = m.lastResult; }
+      if (m.status === 'exited' && stoppedByUs) sysPill('Stopped — send a message to resume.');
       renderMeta();
       if (m.lastResult) renderCost(m.lastResult);
     }
@@ -162,13 +220,19 @@
     if (it.t === 'tool_use') return renderTool(el, it);
 
     if (it.t === 'assistant') {
-      el.className = 'turn assistant';
-      const caret = it.streaming ? '<span class="streaming-caret"></span>' : '';
-      el.innerHTML =
-        `<div class="turn-avatar"><span class="orb-mini">◉</span></div>` +
-        `<div class="turn-body"><div class="turn-author">Stan</div>` +
-        `<div class="prose">${mdToHtml(it.text)}${caret}</div></div>`;
-      wireCopies(el);
+      // Build the turn structure once; subsequent streaming deltas only repaint
+      // the .prose node, and even that is coalesced to one paint per frame in
+      // doFlush(). (Re-rendering the whole turn on every token was O(n²) — the
+      // jank that made scrolling up to read while Stan typed feel broken.)
+      if (el._kind !== 'assistant') {
+        el.className = 'turn assistant';
+        el.innerHTML =
+          `<div class="turn-avatar"><span class="orb-mini">◉</span></div>` +
+          `<div class="turn-body"><div class="turn-author">Stan</div><div class="prose"></div></div>`;
+        el._kind = 'assistant';
+      }
+      pendingStream.set(el, it);
+      return;
     } else if (it.t === 'user') {
       el.className = 'turn user';
       let html = '';
@@ -255,15 +319,51 @@
     const dot = $('status-dot'), txt = $('status-text');
     const s = meta.status || 'offline';
     dot.className = 'status-dot ' + (s === 'thinking' ? 'thinking' : s === 'exited' ? 'exited' : s === 'idle' ? 'idle' : '');
-    txt.textContent = s === 'thinking' ? 'thinking…' : s === 'idle' ? 'ready' : s === 'exited' ? 'session ended' : s;
+    txt.textContent = s === 'thinking' ? 'thinking…' : s === 'idle' ? 'ready'
+      : s === 'exited' ? (stoppedByUs ? 'stopped' : 'session ended') : s;
     $('chip-project-v').textContent = (meta.cwd || '~').split('/').pop() || '~';
     $('chip-mode-v').textContent = modeLabel(meta.permMode);
-    $('send-btn').disabled = false;
+    setSendMode(s === 'thinking');
   }
   function setStatus(s) {
     const dot = $('status-dot'), txt = $('status-text');
     if (dot) dot.className = 'status-dot';
     if (txt) txt.textContent = s;
+    setSendMode(false);
+  }
+  // Connection-state display, debounced so a fast reconnect never flickers the
+  // pill. 'open' immediately repaints the live session status; a 'connecting' /
+  // 'offline' blip only paints "reconnecting…" if it outlasts the grace window —
+  // so the common sub-second reattach (phone unlock) is invisible.
+  function setConn(state) {
+    clearTimeout(connTimer);
+    if (state === 'open') { renderMeta(); return; }
+    connTimer = setTimeout(() => {
+      const dot = $('status-dot'), txt = $('status-text');
+      if (dot) dot.className = 'status-dot';
+      if (txt) txt.textContent = 'reconnecting…';
+      setSendMode(false);
+    }, 1200);
+  }
+  // The send control doubles as a Stop button while Claude is working: tap it to
+  // halt the current turn (kills + auto-resumes on the next message) — essential
+  // for reining in an autopilot session from a phone.
+  function setSendMode(busy) {
+    const b = $('send-btn'); if (!b) return;
+    b.classList.toggle('stop', busy);
+    b.innerHTML = busy ? STOP_SVG : SEND_SVG;
+    b.setAttribute('aria-label', busy ? 'Stop' : 'Send');
+    b.disabled = false;
+    if (!busy) updateSendDim();
+  }
+  function updateSendDim() {
+    const b = $('send-btn'); if (!b || b.classList.contains('stop')) return;
+    b.classList.toggle('send-idle', !$('prompt').value.trim() && !pending.length);
+  }
+  function stopGen() {
+    stoppedByUs = true;
+    haptic(22);
+    try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'kill' })); } catch {}
   }
   function renderCost(lr) {
     if (!lr || lr.costUsd == null) return;
@@ -271,16 +371,39 @@
     $('meta-cost').textContent = `$${lr.costUsd.toFixed(4)} · ${sec}`;
   }
 
-  function scrollDown(force) {
-    const t = $('thread');
-    if (force || (t.scrollHeight - t.scrollTop - t.clientHeight) < 200) {
-      requestAnimationFrame(() => { t.scrollTop = t.scrollHeight; updateJump(); });
+  // One rAF that paints any queued streaming prose AND follows the bottom — at
+  // most once per frame no matter how many deltas arrived, and only scrolling
+  // when the reader is still stuck to the bottom.
+  function scheduleFlush() { if (!flushRaf) flushRaf = requestAnimationFrame(doFlush); }
+  function doFlush() {
+    flushRaf = 0;
+    for (const [el, it] of pendingStream) {
+      const pr = el.querySelector('.prose');
+      if (!pr) continue;
+      pr.innerHTML = mdToHtml(it.text) + (it.streaming ? '<span class="streaming-caret"></span>' : '');
+      if (!it.streaming) wireCopies(el);
     }
+    pendingStream.clear();
+    const t = $('thread'); if (!t) return;
+    if (stick) t.scrollTop = t.scrollHeight;
+    updateJump();
+  }
+  function jumpLatest() {
+    stick = true;
+    const t = $('thread'); if (!t) return;
+    t.scrollTo ? t.scrollTo({ top: t.scrollHeight, behavior: 'smooth' }) : (t.scrollTop = t.scrollHeight);
+    updateJump();
+  }
+  // Reader-intent tracking: a meaningful scroll-up un-sticks the feed so live
+  // output stops dragging the viewport; scrolling back to the bottom re-sticks.
+  function onThreadScroll() {
+    const t = $('thread'); if (!t) return;
+    stick = (t.scrollHeight - t.scrollTop - t.clientHeight) < 90;
+    updateJump();
   }
   function updateJump() {
-    const t = $('thread'), b = $('jump-btn'); if (!b) return;
-    const far = (t.scrollHeight - t.scrollTop - t.clientHeight) > 280;
-    b.classList.toggle('show', far);
+    const t = $('thread'), b = $('jump-btn'); if (!b || !t) return;
+    b.classList.toggle('show', (t.scrollHeight - t.scrollTop - t.clientHeight) > 280);
   }
 
   // ── markdown ──────────────────────────────────────────
@@ -301,6 +424,13 @@
       `<button class="copy" data-code="${esc(c.body)}">Copy</button></div>` +
       `<pre><code>${esc(c.body)}</code></pre></div>`;
   }
+  // GFM table: split a "| a | b |" row into trimmed cells.
+  const tableCells = line => line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+  function renderTable(rows) {
+    const head = tableCells(rows[0]).map(c => `<th>${inlineMd(c)}</th>`).join('');
+    const body = rows.slice(1).map(r => `<tr>${tableCells(r).map(c => `<td>${inlineMd(c)}</td>`).join('')}</tr>`).join('');
+    return `<div class="md-tablewrap"><table class="md-table"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+  }
   function mdToHtml(src) {
     src = String(src || '');
     const code = [];
@@ -310,14 +440,29 @@
     });
     const out = [];
     let para = [], list = null;
-    const closeList = () => { if (list) { out.push(`<${list.type} class="md-list">${list.items.map(x => `<li>${x}</li>`).join('')}</${list.type}>`); list = null; } };
+    const closeList = () => { if (list) { out.push(`<${list.type} class="md-list${list.check ? ' checklist' : ''}">${list.items.map(x => `<li>${x}</li>`).join('')}</${list.type}>`); list = null; } };
     const closePara = () => { if (para.length) { out.push(`<p>${para.join('<br>')}</p>`); para = []; } };
-    for (const line of src.split('\n')) {
+    const lines = src.split('\n');
+    for (let li = 0; li < lines.length; li++) {
+      const line = lines[li];
       let m;
       if ((m = line.match(/^ (\d+) $/))) { closePara(); closeList(); out.push(renderCode(code[+m[1]])); continue; }
       if (/^\s*$/.test(line)) { closePara(); closeList(); continue; }
-      if ((m = line.match(/^\s*[-*]\s+(.*)/))) { closePara(); if (!list || list.type !== 'ul') { closeList(); list = { type: 'ul', items: [] }; } list.items.push(inlineMd(m[1])); continue; }
-      if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { closePara(); if (!list || list.type !== 'ol') { closeList(); list = { type: 'ol', items: [] }; } list.items.push(inlineMd(m[1])); continue; }
+      if (/^\s*\|.*\|\s*$/.test(line) && li + 1 < lines.length && /^\s*\|[\s:|-]*-[\s:|-]*\|\s*$/.test(lines[li + 1])) {
+        closePara(); closeList();
+        const rows = [line]; let j = li + 2;
+        while (j < lines.length && /^\s*\|.*\|\s*$/.test(lines[j])) rows.push(lines[j++]);
+        out.push(renderTable(rows)); li = j - 1; continue;
+      }
+      if ((m = line.match(/^\s*[-*]\s+(.*)/))) {
+        closePara();
+        if (!list || list.type !== 'ul') { closeList(); list = { type: 'ul', items: [], check: false }; }
+        const task = m[1].match(/^\[([ xX])\]\s+([\s\S]*)$/);
+        if (task) { list.check = true; list.items.push(`<span class="md-task${task[1].toLowerCase() === 'x' ? ' done' : ''}"><i class="md-check"></i><span>${inlineMd(task[2])}</span></span>`); }
+        else list.items.push(inlineMd(m[1]));
+        continue;
+      }
+      if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { closePara(); if (!list || list.type !== 'ol') { closeList(); list = { type: 'ol', items: [], check: false }; } list.items.push(inlineMd(m[1])); continue; }
       closeList();
       if ((m = line.match(/^(#{1,3})\s+(.*)/))) { closePara(); const l = m[1].length; out.push(`<div class="md-h md-h${l}">${inlineMd(m[2])}</div>`); continue; }
       if ((m = line.match(/^>\s?(.*)/))) { closePara(); out.push(`<blockquote>${inlineMd(m[1])}</blockquote>`); continue; }
@@ -339,6 +484,7 @@
   // the last project/model — no drawer round-trip. Optionally fire a first
   // message the instant the session is live.
   function startAuto(firstMessage) {
+    stoppedByUs = false; haptic(14);
     pendingNew = {
       mode: 'bypassPermissions',
       model: cfg.model,
@@ -404,6 +550,7 @@
         : `<div class="att-chip"><span class="att-ico">📄</span><span class="att-nm">${esc(p.name)}</span><button class="att-x" data-x="${i}">✕</button></div>`
     ).join('');
     tray.classList.toggle('show', pending.length > 0);
+    updateSendDim();
     tray.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', () => {
       const i = +b.dataset.x, p = pending[i];
       if (p && p.url) URL.revokeObjectURL(p.url);
@@ -438,6 +585,7 @@
     const ta = $('prompt');
     const text = ta.value.trim();
     if (!text && !pending.length) return;
+    stoppedByUs = false; haptic(9);
 
     // /auto launches a fresh autopilot session — but only when sending plain
     // text; with attachments staged we just deliver them to the current chat.
@@ -475,7 +623,7 @@
       const pill = document.createElement('div');
       pill.className = 'turn system error';
       pill.innerHTML = `<div class="sys-pill">Attachment failed: ${esc(e.message)}</div>`;
-      t.appendChild(pill); scrollDown(true);
+      t.appendChild(pill); scheduleFlush();
     } finally {
       atts.forEach(a => { if (a.url) URL.revokeObjectURL(a.url); });
       sendBtn.disabled = false;
@@ -486,9 +634,14 @@
   // ── Drawer ────────────────────────────────────────────
   function openDrawer(mode) {
     $('drawer').classList.remove('hidden');
-    if (mode === 'new') renderNewChat(); else renderSessions();
+    if (mode === 'new') renderNewChat();
+    else if (mode === 'settings') renderSettings();
+    else renderSessions();
   }
   function closeDrawer() { $('drawer').classList.add('hidden'); }
+
+  // A chat has a live process (Ongoing) vs none (Disconnected — resumable on tap).
+  const isLive = s => s.status === 'idle' || s.status === 'thinking' || s.status === 'starting';
 
   async function renderSessions() {
     $('drawer-title').textContent = 'Chats';
@@ -496,32 +649,120 @@
     body.innerHTML = '<div class="mode-note">Loading…</div>';
     let list = [];
     try { list = await api('/api/chat').then(r => r.json()); } catch { return; }
-    const rows = list.map(s => {
-      const when = timeAgo(s.lastActive);
-      const dir = (s.cwd || '~').split('/').pop();
-      const stat = s.status === 'thinking' ? '● thinking' : s.status === 'idle' ? 'ready' : s.status;
-      return `<div class="sess-row" data-id="${esc(s.id)}">
-        <div class="sess-icon">◉</div>
-        <div class="sess-info">
-          <div class="sess-name">${esc(s.name)} <span style="color:var(--text-dim);font-weight:400">· ${esc(dir)}</span></div>
-          <div class="sess-meta">${esc(modeLabel(s.permMode))} · ${esc(stat)} · ${esc(when)}</div>
-        </div>
-        <button class="sess-del" data-del="${esc(s.id)}">✕</button>
-      </div>`;
-    }).join('');
-    body.innerHTML = (rows || '<div class="mode-note">No chats yet. Tap “New chat” to start one.</div>') +
-      `<button class="drawer-cta" id="cta-new">New chat</button>`;
-    body.querySelectorAll('.sess-row').forEach(r => r.addEventListener('click', e => {
+
+    // Split connected (live process) from disconnected (resumable). Within the
+    // live group, surface the ones actually working first.
+    const rank = s => s.status === 'thinking' ? 0 : s.status === 'starting' ? 1 : 2;
+    const live = list.filter(isLive).sort((a, b) => rank(a) - rank(b) || b.lastActive - a.lastActive);
+    const ended = list.filter(s => !isLive(s)).sort((a, b) => b.lastActive - a.lastActive);
+    const head = (label, cls, n, extra = '') =>
+      `<div class="sess-section-h ${cls}">${label}<span class="sess-count">${n}</span>${extra}</div>`;
+
+    body.innerHTML =
+      `<div class="sess-search-wrap"><input id="sess-search" class="sess-search" placeholder="Search chats…" autocomplete="off" spellcheck="false"></div>` +
+      `<div id="sess-list">` +
+        (list.length
+          ? (live.length ? head('Ongoing', 'live', live.length) + live.map(sessionRow).join('') : '') +
+            (ended.length ? head('Disconnected', 'off', ended.length, '<button class="sess-clear" id="clear-ended">Clear all</button>') + ended.map(sessionRow).join('') : '')
+          : '<div class="mode-note">No chats yet. Tap “New chat” to start one.</div>') +
+      `</div>` +
+      `<button class="drawer-cta" id="cta-new">＋ New chat</button>`;
+
+    wireSessionRows(body);
+    const search = $('sess-search');
+    if (search) search.addEventListener('input', () => filterSessions(body, search.value.trim().toLowerCase()));
+    const clr = $('clear-ended');
+    if (clr) clr.addEventListener('click', async () => {
+      clr.disabled = true; clr.textContent = 'Clearing…';
+      await Promise.all(ended.map(s => api('/api/chat/' + s.id, { method: 'DELETE' }).catch(() => {})));
+      renderSessions();
+    });
+    $('cta-new').addEventListener('click', () => renderNewChat());
+  }
+
+  function sessionRow(s) {
+    const dir = (s.cwd || '~').split('/').pop() || '~';
+    const dotClass = s.status === 'thinking' ? 'thinking' : isLive(s) ? 'idle' : 'exited';
+    const stat = s.status === 'thinking' ? 'working…' : s.status === 'idle' ? 'ready'
+      : s.status === 'starting' ? 'starting…' : s.status === 'error' ? 'error' : 'resumable';
+    const cur = s.id === sessionId ? ' cur' : '';
+    const hay = ((s.name || '') + ' ' + dir).toLowerCase();
+    const prev = s.lastText ? `<div class="sess-prev">${esc(s.lastText)}</div>` : '';
+    return `<div class="sess-row${cur}" data-id="${esc(s.id)}" data-hay="${esc(hay)}">
+      <div class="sess-icon${isLive(s) ? '' : ' off'}">◉</div>
+      <div class="sess-info">
+        <div class="sess-name">${esc(s.name)}<span class="sess-dir"> · ${esc(dir)}</span></div>
+        <div class="sess-meta"><span class="status-dot ${dotClass}"></span>${esc(modeLabel(s.permMode))} · ${esc(stat)} · ${esc(timeAgo(s.lastActive))}</div>
+        ${prev}
+      </div>
+      <button class="sess-del" data-del="${esc(s.id)}">✕</button>
+    </div>`;
+  }
+
+  function wireSessionRows(scope) {
+    scope.querySelectorAll('.sess-row').forEach(r => r.addEventListener('click', e => {
       if (e.target.closest('[data-del]')) return;
-      sessionId = r.dataset.id; closeDrawer(); connect(false);
+      sessionId = r.dataset.id; closeDrawer(); clearThread(); stick = true; connect(false);
     }));
-    body.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async e => {
+    scope.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async e => {
       e.stopPropagation();
       await api('/api/chat/' + b.dataset.del, { method: 'DELETE' }).catch(() => {});
       if (b.dataset.del === sessionId) { sessionId = null; localStorage.removeItem(LS.last); clearThread(); }
       renderSessions();
     }));
-    $('cta-new').addEventListener('click', () => renderNewChat());
+  }
+
+  // Live filter: hide non-matching rows, then hide any section header left empty.
+  function filterSessions(scope, q) {
+    scope.querySelectorAll('.sess-row').forEach(r => {
+      r.style.display = (!q || r.dataset.hay.includes(q)) ? '' : 'none';
+    });
+    scope.querySelectorAll('.sess-section-h').forEach(h => {
+      let n = h.nextElementSibling, any = false;
+      while (n && n.classList.contains('sess-row')) { if (n.style.display !== 'none') any = true; n = n.nextElementSibling; }
+      h.style.display = any ? '' : 'none';
+    });
+  }
+
+  // ── Settings ──────────────────────────────────────────
+  function renderSettings() {
+    $('drawer-title').textContent = 'Settings';
+    const body = $('drawer-body');
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    const themeBtns = THEMES.map(t => `<button class="opt ${themeNow() === t ? 'sel' : ''}" data-stheme="${t}">${cap(t)}</button>`).join('');
+    const modeOpts = MODES.map(m => `<button class="opt ${cfg.mode === m.v ? 'sel' : ''}" data-smode="${m.v}">${esc(m.label)}</button>`).join('');
+    const modelOpts = MODELS.map(m => `<button class="opt ${cfg.model === m.v ? 'sel' : ''}" data-smodel="${esc(m.v)}">${esc(m.label)}</button>`).join('');
+    body.innerHTML = `
+      <div class="drawer-section-label">Appearance</div><div class="opt-grid">${themeBtns}</div>
+      <div class="drawer-section-label">Default mode · new chats</div><div class="opt-grid">${modeOpts}</div>
+      <div class="mode-note" id="s-note">${esc((MODES.find(m => m.v === cfg.mode) || {}).note || '')}</div>
+      <div class="drawer-section-label">Default model · new chats</div><div class="opt-grid">${modelOpts}</div>
+      <div class="drawer-section-label">Maintenance</div>
+      <button class="opt wide danger" id="s-clear">Clear all disconnected chats</button>
+      <button class="drawer-cta" id="s-back">← Back to chats</button>`;
+    body.querySelectorAll('[data-stheme]').forEach(b => b.addEventListener('click', () => {
+      const t = b.dataset.stheme;
+      if (t === 'system') localStorage.removeItem('stan_theme'); else localStorage.setItem('stan_theme', t);
+      applyTheme(t); renderThemeBtn();
+      body.querySelectorAll('[data-stheme]').forEach(x => x.classList.toggle('sel', x === b));
+    }));
+    body.querySelectorAll('[data-smode]').forEach(b => b.addEventListener('click', () => {
+      cfg.mode = b.dataset.smode; localStorage.setItem(LS.mode, cfg.mode);
+      const c = $('chip-mode-v'); if (c) c.textContent = modeLabel(cfg.mode);
+      $('s-note').textContent = (MODES.find(m => m.v === cfg.mode) || {}).note || '';
+      body.querySelectorAll('[data-smode]').forEach(x => x.classList.toggle('sel', x === b));
+    }));
+    body.querySelectorAll('[data-smodel]').forEach(b => b.addEventListener('click', () => {
+      cfg.model = b.dataset.smodel; localStorage.setItem(LS.model, cfg.model);
+      body.querySelectorAll('[data-smodel]').forEach(x => x.classList.toggle('sel', x === b));
+    }));
+    $('s-clear').addEventListener('click', async () => {
+      const btn = $('s-clear'); btn.disabled = true; btn.textContent = 'Clearing…';
+      let l = []; try { l = await api('/api/chat').then(r => r.json()); } catch {}
+      await Promise.all(l.filter(s => !isLive(s)).map(s => api('/api/chat/' + s.id, { method: 'DELETE' }).catch(() => {})));
+      renderSessions();
+    });
+    $('s-back').addEventListener('click', () => renderSessions());
   }
 
   async function renderNewChat() {
@@ -630,7 +871,7 @@
       } catch {}
     }));
     if ($('fan-prompt')) $('fan-prompt').value = '';
-    document.querySelectorAll('.fan-dir.sel').forEach(b => b.classList.remove('sel'));
+    _root.querySelectorAll('.fan-dir.sel').forEach(b => b.classList.remove('sel'));
     fanDirs.clear();
     if (btn) { btn.disabled = false; btn.textContent = 'Launch agents'; }
     refreshFleet();
@@ -705,13 +946,19 @@
     $('chip-project-v').textContent = cfg.dirLabel || 'Home';
     sessionId = localStorage.getItem(LS.last) || null;
     if (sessionId) connect(false); else setStatus('— tap + to start');
+    updateSendDim();
   }
 
   function init() {
-    $('token-submit').addEventListener('click', doLogin);
-    $('token-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-    $('send-btn').addEventListener('click', send);
-    $('prompt').addEventListener('input', e => autoGrow(e.target));
+    const tSubmit = $('token-submit'), tInput = $('token-input');   // standalone-only
+    if (tSubmit) tSubmit.addEventListener('click', doLogin);
+    if (tInput) tInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+    $('send-btn').addEventListener('click', () => {
+      if ($('send-btn').classList.contains('stop')) stopGen(); else send();
+    });
+    $('prompt').addEventListener('input', e => { autoGrow(e.target); updateSendDim(); });
+    $('theme-btn').addEventListener('click', cycleTheme);
+    renderThemeBtn();
     $('prompt').addEventListener('keydown', e => {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     });
@@ -734,13 +981,139 @@
     });
     $('chip-mode').addEventListener('click', () => openDrawer('new'));
     $('chip-project').addEventListener('click', () => openDrawer('new'));
-    $('thread').addEventListener('scroll', updateJump, { passive: true });
-    const jb = $('jump-btn'); if (jb) jb.addEventListener('click', () => scrollDown(true));
+    const sb = $('settings-btn'); if (sb) sb.addEventListener('click', () => openDrawer('settings'));
+    $('thread').addEventListener('scroll', onThreadScroll, { passive: true });
+    const jb = $('jump-btn'); if (jb) jb.addEventListener('click', jumpLatest);
+
+    // Instant reattach on unlock/foreground — iOS suspends the socket while
+    // backgrounded; don't wait out the reconnect backoff, snap back live the
+    // moment the user returns. This is the "survives a phone lock" promise.
+    const ensureLive = () => {
+      if (!token || !sessionId || document.hidden) return;
+      if (!ws || ws.readyState > 1) { reconnectDelay = 500; connect(false); }
+    };
+    document.addEventListener('visibilitychange', ensureLive);
+    window.addEventListener('focus', ensureLive);
 
     if (token) tryToken(token).then(ok => ok ? boot() : showAuth());
     else showAuth();
 
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
+    if (_standalone && 'serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {});
   }
-  document.addEventListener('DOMContentLoaded', init);
+  // ── Mount API — one client, two surfaces ─────────────────────────────────
+  // Markup injected into a ShadowRoot when embedded in the Stan CLI cockpit.
+  // (The standalone PWA already has this markup inline in its index.html.)
+  const EMBED_CSS = `
+    :host {
+      position: absolute; inset: 0; display: block;
+      font-family: var(--font-ui); color: var(--text-primary);
+      /* chat.css sets these on :root, which doesn't match inside a shadow tree,
+         so redefine them on :host (inherited by shadow descendants). --canvas
+         follows --bg from tokens.css, so it stays theme-aware automatically. */
+      --canvas: var(--bg);
+      --rail-w: 34px;
+      --col-max: 740px;
+      --halo: rgba(255,59,92,0.28);
+      --blur: saturate(180%) blur(22px);
+    }
+    #app { position: absolute; }
+    #auth-screen { display: none !important; }
+    #drawer, #fleet { position: absolute; }
+  `;
+  const CHAT_HTML = `
+  <div id="app">
+    <header id="topbar">
+      <button class="icon-btn" id="menu-btn" aria-label="Chats">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
+      <div class="topbar-title">
+        <div class="topbar-name" id="chat-name">Stan Chat</div>
+        <div class="topbar-sub" id="chat-status"><span class="status-dot" id="status-dot"></span><span id="status-text">offline</span></div>
+      </div>
+      <button class="icon-btn" id="fleet-btn" aria-label="Fleet" title="Agent fleet">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+      </button>
+      <button class="icon-btn bolt" id="bolt-btn" aria-label="Quick auto session" title="Quick auto session">
+        <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13z"/></svg>
+      </button>
+      <button class="icon-btn" id="new-btn" aria-label="New chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </header>
+    <div id="thread">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-orb">◉</div>
+        <div class="empty-title">Talk to StanAI</div>
+        <div class="empty-sub">Claude Code, live on the kay2 Pi — full repo access and every tool. Ask it to build, fix, explain or explore, and watch the work happen.</div>
+        <div class="empty-actions"><button class="empty-auto" id="empty-auto">⚡ Quick auto session</button></div>
+        <div class="empty-hint">or type <code>/auto</code> in the box to launch one instantly</div>
+        <div class="empty-chips" id="empty-chips"></div>
+      </div>
+    </div>
+    <button id="jump-btn" aria-label="Jump to latest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+    </button>
+    <div id="composer">
+      <div id="composer-inner">
+        <div id="composer-meta">
+          <button class="meta-chip" id="chip-project"><span class="meta-chip-k">dir</span><span id="chip-project-v">~</span></button>
+          <button class="meta-chip" id="chip-mode"><span class="meta-chip-k">mode</span><span id="chip-mode-v">Plan</span></button>
+          <span class="meta-cost" id="meta-cost"></span>
+        </div>
+        <div id="attach-tray"></div>
+        <div id="composer-row">
+          <input id="file-input" type="file" multiple accept="image/*,.txt,.md,.json,.js,.ts,.py,.sh,.css,.html,.csv,.log,.pdf,.yml,.yaml,.toml" hidden>
+          <button id="attach-btn" aria-label="Attach files" title="Attach files & photos">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <textarea id="prompt" rows="1" placeholder="Message StanAI…  (/auto = autopilot)" spellcheck="false"></textarea>
+          <button id="send-btn" aria-label="Send">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="fleet" class="hidden">
+    <header class="fleet-head"><div class="fleet-title">Agent Fleet</div><button class="text-btn" id="fleet-close">Done</button></header>
+    <div id="fleet-body"></div>
+  </div>
+  <div id="drawer" class="hidden">
+    <div class="drawer-scrim" id="drawer-scrim"></div>
+    <div class="drawer-panel">
+      <div class="drawer-head">
+        <span id="drawer-title">Chats</span>
+        <button class="icon-sm" id="settings-btn" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+        <button class="icon-sm" id="theme-btn" aria-label="Theme" title="Theme"></button>
+        <button class="text-btn" id="drawer-close">Done</button>
+      </div>
+      <div id="drawer-body"></div>
+    </div>
+  </div>`;
+
+  function mount(opts = {}) {
+    _root = opts.root || document;
+    _standalone = opts.standalone !== false;
+    token = localStorage.getItem(LS.token) || token;   // re-read: cockpit may auth after load
+    if (!_standalone && !_root.getElementById('app')) {
+      _root.innerHTML =
+        (opts.css ? `<style>${opts.css}</style>` : '') +
+        `<style>${EMBED_CSS}</style>` + CHAT_HTML;
+    }
+    init();
+  }
+  // Cockpit calls this when the Chat tab is re-shown: snap the socket back live.
+  function show() {
+    try {
+      if (token && sessionId && (!ws || ws.readyState > 1)) { reconnectDelay = 500; connect(false); }
+      stick = true; scheduleFlush();
+    } catch {}
+  }
+  window.StanChat = { mount, show };
+
+  // Standalone page auto-mounts; the cockpit embeds via StanChat.mount() instead.
+  document.addEventListener('DOMContentLoaded', () => {
+    if (document.body && document.body.hasAttribute('data-stanchat-standalone'))
+      mount({ root: document, standalone: true });
+  });
 })();

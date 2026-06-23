@@ -92,9 +92,11 @@ output appears, never for chrome.
 ### The turn (assistant)
 Full-width, no card. A 28px **orb avatar** on a left rail; an UPPERCASE `STAN`
 author label; then the prose. Rich markdown: headings, lists, blockquotes,
-rules, links, inline code, and **language-labelled code blocks** with a copy
-button. Streaming shows a blinking accent caret; arrival animates with a 6px
-rise + fade.
+rules, links, inline code, **GFM tables** (hairline grid, header tint, scrolls
+horizontally on phone), **task-list checkboxes** (`- [ ]` / `- [x]`, the done
+state filling green + strikethrough), and **language-labelled code blocks** with
+a copy button. Streaming shows a blinking accent caret; arrival animates with a
+6px rise + fade.
 
 ### The turn (user)
 Right-aligned bubble, `--accent` fill, white text, 20px radius with one tucked
@@ -122,8 +124,11 @@ tint. For connection/lifecycle notes only.
 A translucent blurred dock pinned to the bottom safe area. Above the input: a
 meta row of **chips** (`dir`, `mode`) + a right-aligned cost readout. The input
 is a rounded pill that auto-grows to 140px; focus lifts a subtle accent ring.
-The send button is a circular accent control with press-scale feedback and a
-disabled state. `/auto` in the box launches an autopilot session.
+The send button is a circular accent control with press-scale feedback; it
+**dims when the box is empty** and **morphs into a Stop square while Claude is
+working** — tapping it halts the current turn (and auto-resumes on the next
+message), the key control for reining in an autopilot from a phone. `/auto` in
+the box launches an autopilot session.
 
 ### Empty state
 A large floating orb (gentle 4s bob + soft red halo), a heavy welcome title, a
@@ -138,6 +143,8 @@ tap returns to live. Hidden at the bottom.
 Bottom sheet, rounded top, blurred scrim. Session rows: orb icon, name + dir,
 mono meta line (mode · status · age), delete. The new-chat view uses
 section-labelled pill grids (Project / Model / Permissions) + a mode note + CTA.
+The drawer header also holds the **theme toggle** — a small icon button cycling
+system → light → dark (sun / moon / split-disc glyph), persisted per device.
 
 ---
 

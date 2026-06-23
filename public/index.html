@@ -104,6 +104,15 @@
             <div style="padding:20px 16px;color:var(--text-dim);font-size:14px">Loading…</div>
           </div>
         </div>
+        <div class="news-section" id="home-ops-section">
+          <div class="news-section-header">
+            <span>Live Ops</span>
+            <button class="news-see-all" onclick="App.showTab('ops')">Manage</button>
+          </div>
+          <div id="home-ops-list">
+            <div class="ops-command-center loading">Loading command centre…</div>
+          </div>
+        </div>
         <div style="padding:0 16px 40px">
           <div id="home-sys-bar"></div>
         </div>
@@ -123,6 +132,12 @@
       </div>
       <div id="terminal-container"></div>
       <div id="keybar"></div>
+    </div>
+
+    <!-- Chat tab — StanAI premium chat, mounted natively (Shadow DOM) from the
+         shared StanChat client. Same engine as the standalone StanChat product. -->
+    <div id="tab-chat" class="tab-panel hidden">
+      <div id="chat-host"></div>
     </div>
 
     <!-- Agents tab -->
@@ -382,7 +397,7 @@
           <div class="settings-group" style="margin:0 16px">
             <div class="settings-row">
               <span class="settings-row-label">Stan CLI</span>
-              <span class="settings-row-value">v4.1</span>
+              <span class="settings-row-value">v4.2</span>
             </div>
             <div class="settings-row">
               <span class="settings-row-label">Device</span>
@@ -419,7 +434,7 @@
       </svg>
       Agents
     </button>
-    <button class="tab-btn" data-href="/stanchat/" aria-label="Stan Chat">
+    <button class="tab-btn" data-tab="chat" aria-label="Stan Chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
         <path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 9 9 0 0 1-3.9-.9L3 21l1.9-5.1A8.38 8.38 0 0 1 4 11.5 8.5 8.5 0 0 1 12.5 3 8.38 8.38 0 0 1 21 11.5z"/>
         <circle cx="9" cy="11.5" r="1" fill="currentColor" stroke="none"/>
@@ -525,6 +540,8 @@
 <script src="screen.js"></script>
 <script src="phone.js"></script>
 <script src="ops.js"></script>
+<script src="/stanchat/chat.js"></script>
+<script src="chatpane.js"></script>
 <script src="shell.js"></script>
 </body>
 </html>

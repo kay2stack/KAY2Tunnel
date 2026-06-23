@@ -61,6 +61,7 @@ const App = (() => {
     if (name === 'screen')   Screen?.activate();
     if (name === 'phone')    Phone?.activate();
     if (name === 'ops')      Ops?.activate();
+    if (name === 'chat')     Chat?.activate();
     if (name === 'home')     loadHomeStats();
     if (name === 'more')     { loadMoreStats(); loadSettings(); refreshNotifUI(); }
 
@@ -553,6 +554,22 @@ const App = (() => {
     });
   }
 
+  function _diskPct(disk) {
+    if (!disk) return null;
+    if (disk.pct) return parseInt(String(disk.pct).replace(/[^0-9.]/g, ''), 10);
+    const parse = v => {
+      if (typeof v === 'number') return v;
+      const m = String(v || '').trim().match(/^([0-9.]+)\s*([KMGTPE]?)/i);
+      if (!m) return NaN;
+      const n = parseFloat(m[1]);
+      const unit = (m[2] || '').toUpperCase();
+      const mult = { K:1e3, M:1e6, G:1e9, T:1e12, P:1e15, E:1e18 }[unit] || 1;
+      return n * mult;
+    };
+    const used = parse(disk.used), total = parse(disk.total);
+    return total > 0 ? Math.round((used / total) * 100) : null;
+  }
+
   async function loadHomeStats() {
     // Date
     const dateEl = document.getElementById('home-date');
@@ -562,12 +579,18 @@ const App = (() => {
     }
 
     // Parallel fetches
-    const [sessions, agents, projects, sys] = await Promise.all([
+    const [sessions, agents, projects, sys, disk, jobs] = await Promise.all([
       apiFetch('/api/term/sessions').then(r => r.json()).catch(() => []),
       apiFetch('/api/agents').then(r => r.json()).catch(() => []),
       apiFetch('/api/projects').then(r => r.json()).catch(() => []),
       apiFetch('/api/system').then(r => r.json()).catch(() => null),
+      apiFetch('/api/pi/disk').then(r => r.json()).catch(() => null),
+      apiFetch('/api/ops/jobs').then(r => r.json()).catch(() => []),
     ]);
+
+    const cpu = sys?.cpu ?? 0;
+    const mem = sys?.mem?.pct ?? 0;
+    const temp = sys?.temp ?? null;
 
     // Command Deck hero
     const heroEl = document.getElementById('home-hero');
@@ -575,9 +598,7 @@ const App = (() => {
       const running = agents.filter(a => a.session);
       const installed = agents.filter(a => a.installed).length;
       const dirty = projects.filter(p => p.git && p.git.dirty).length;
-      const cpu = sys?.cpu ?? 0;
-      const mem = sys?.mem?.pct ?? 0;
-      const temp = sys?.temp ?? null;
+      const scheduled = jobs.filter(j => j.enabled).length;
       const health = temp != null && temp >= 75 ? 'hot' : (cpu >= 85 || mem >= 90 ? 'busy' : 'ready');
       const healthLabel = health === 'hot' ? 'Thermal watch' : health === 'busy' ? 'Busy' : 'Ready';
       const lead = running.length
@@ -604,11 +625,11 @@ const App = (() => {
             <div><span>CPU</span><b>${cpu != null ? esc(cpu + '%') : '—'}</b></div>
             <div><span>MEM</span><b>${mem != null ? esc(mem + '%') : '—'}</b></div>
             <div><span>AGENTS</span><b>${running.length}/${installed || agents.length || 0}</b></div>
-            <div><span>DIRTY</span><b>${dirty}</b></div>
+            <div><span>JOBS</span><b>${scheduled || jobs.length || 0}</b></div>
           </div>
           <div class="deck-actions">
             <button class="deck-btn primary" id="deck-primary">${running.length ? 'Attach live agent' : 'Launch agent'}</button>
-            <button class="deck-btn" id="deck-chat">Chat ↗</button>
+            <button class="deck-btn" id="deck-chat">Stan Chat</button>
             <button class="deck-btn" data-open="term">Terminal</button>
             <button class="deck-btn" data-open="screen">Screen</button>
             <button class="deck-btn" data-open="ops">Automation</button>
@@ -619,7 +640,7 @@ const App = (() => {
         else showTab('agents');
       });
       heroEl.querySelectorAll('[data-open]').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.open)));
-      document.getElementById('deck-chat')?.addEventListener('click', () => { location.href = '/stanchat/'; });
+      document.getElementById('deck-chat')?.addEventListener('click', () => showTab('chat'));
     }
 
     // Agents list
@@ -693,6 +714,36 @@ const App = (() => {
       }
     }
 
+    // Live Ops command centre
+    const opsEl = document.getElementById('home-ops-list');
+    if (opsEl) {
+      const diskPctRaw = _diskPct(disk);
+      const diskPct = Number.isFinite(diskPctRaw) ? diskPctRaw : null;
+      const enabledJobs = jobs.filter(j => j.enabled);
+      const runningJobs = jobs.filter(j => j.running);
+      const recentJob = [...jobs].sort((a,b) => new Date(b.lastRun || 0) - new Date(a.lastRun || 0))[0];
+      const state = (temp != null && temp >= 75) || (diskPct != null && diskPct >= 90) ? 'warn' : (runningJobs.length ? 'busy' : 'good');
+      const stateLabel = state === 'warn' ? 'Attention' : state === 'busy' ? 'Working' : 'Healthy';
+      opsEl.innerHTML = `
+        <div class="ops-command-center ${state}">
+          <div class="ops-command-head">
+            <div>
+              <div class="ops-command-eyebrow">LIVE CONTROL</div>
+              <div class="ops-command-title">${esc(stateLabel)} cockpit</div>
+              <div class="ops-command-sub">${esc(sessions.length)} terminal session${sessions.length === 1 ? '' : 's'} · ${esc(enabledJobs.length)} scheduled job${enabledJobs.length === 1 ? '' : 's'}${recentJob ? ' · last: ' + esc(recentJob.name || recentJob.id) : ''}</div>
+            </div>
+            <button class="ops-command-open" data-open="ops">Open Ops</button>
+          </div>
+          <div class="ops-command-grid">
+            <button data-open="term"><span>Terminal</span><b>${esc(sessions.length)}</b><small>active shells</small></button>
+            <button data-open="chat"><span>Stan Chat</span><b>AI</b><small>native tab</small></button>
+            <button data-open="pi"><span>Storage</span><b>${diskPct != null ? esc(diskPct + '%') : '—'}</b><small>${disk?.avail ? esc(disk.avail + ' free') : 'disk'}</small></button>
+            <button data-open="ops"><span>Automation</span><b>${esc(runningJobs.length)}</b><small>running now</small></button>
+          </div>
+        </div>`;
+      opsEl.querySelectorAll('[data-open]').forEach(btn => btn.addEventListener('click', () => showTab(btn.dataset.open)));
+    }
+
     // Sys bar footer
     const sysEl = document.getElementById('home-sys-bar');
     if (sysEl && sys) {
@@ -725,10 +776,10 @@ const App = (() => {
           set('more-uptime', h > 0 ? `${h}h ${m}m` : `${m}m`);
         }
       }
-      if (diskRes && diskRes.used && diskRes.total) {
-        const pct = Math.round((diskRes.used / diskRes.total) * 100);
+      if (diskRes) {
+        const pct = _diskPct(diskRes);
         const el = document.getElementById('more-disk');
-        if (el) el.textContent = pct + '%';
+        if (el) el.textContent = pct != null && !Number.isNaN(pct) ? pct + '%' : '—';
       }
     } catch {}
   }
@@ -782,7 +833,7 @@ const App = (() => {
 
     // More tab navigation
     document.getElementById('more-pi-btn')?.addEventListener('click', () => showTab('pi'));
-    document.getElementById('more-chat-btn')?.addEventListener('click', () => { location.href = '/stanchat/'; });
+    document.getElementById('more-chat-btn')?.addEventListener('click', () => showTab('chat'));
     document.getElementById('more-browser-btn')?.addEventListener('click', () => showTab('browser'));
     document.getElementById('more-screen-btn')?.addEventListener('click', () => showTab('screen'));
     document.getElementById('more-phone-btn')?.addEventListener('click', () => showTab('phone'));
