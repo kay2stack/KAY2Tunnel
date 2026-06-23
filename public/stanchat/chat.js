@@ -204,9 +204,31 @@
   }
 
   // ── Rendering ─────────────────────────────────────────
-  function clearThread() { items.clear(); toolCards.clear(); $('thread').innerHTML = ''; }
+  // The welcome empty-state ships in the initial markup, but clearThread() wipes
+  // it and hideEmpty() removes it the moment content arrives — so it has to be
+  // re-creatable, or New chat / a deleted chat / an empty session leaves a blank
+  // void instead of the "Talk to StanAI" orb.
+  const EMPTY_HTML =
+    `<div id="empty-state" class="empty-state">` +
+      `<div class="empty-orb">◉</div>` +
+      `<div class="empty-title">Talk to StanAI</div>` +
+      `<div class="empty-sub">Claude Code, live on the kay2 Pi — full repo access and every tool. Ask it to build, fix, explain or explore, and watch the work happen.</div>` +
+      `<div class="empty-actions"><button class="empty-auto" id="empty-auto">⚡ Quick auto session</button></div>` +
+      `<div class="empty-hint">or type <code>/auto</code> in the box to launch one instantly</div>` +
+      `<div class="empty-chips" id="empty-chips"></div>` +
+    `</div>`;
+  function clearThread() { items.clear(); toolCards.clear(); $('thread').innerHTML = ''; showEmpty(); }
 
   function hideEmpty() { const e = $('empty-state'); if (e) e.remove(); }
+  // (Re)mount the welcome orb whenever the thread holds no real turns. Idempotent,
+  // and re-wires its controls (starter chips + quick-auto) each call since the
+  // node is freshly minted.
+  function showEmpty() {
+    const t = $('thread'); if (!t || items.size) return;
+    if (!$('empty-state')) t.insertAdjacentHTML('afterbegin', EMPTY_HTML);
+    renderEmptyChips();
+    const ea = $('empty-auto'); if (ea) ea.onclick = () => startAuto();
+  }
 
   function renderItem(it) {
     if (it.t === 'tool_result') return attachResult(it);
@@ -941,7 +963,7 @@
   // ── Boot ──────────────────────────────────────────────
   function boot() {
     showApp();
-    renderEmptyChips();
+    showEmpty();
     $('chip-mode-v').textContent = modeLabel(cfg.mode);
     $('chip-project-v').textContent = cfg.dirLabel || 'Home';
     sessionId = localStorage.getItem(LS.last) || null;
@@ -967,7 +989,7 @@
     $('bolt-btn').addEventListener('click', () => startAuto());
     $('fleet-btn').addEventListener('click', openFleet);
     $('fleet-close').addEventListener('click', closeFleet);
-    const ea = $('empty-auto'); if (ea) ea.addEventListener('click', () => startAuto());
+    // empty-auto is wired by showEmpty() (the orb is re-created on clear/new chat).
     $('drawer-close').addEventListener('click', closeDrawer);
     $('drawer-scrim').addEventListener('click', closeDrawer);
 
