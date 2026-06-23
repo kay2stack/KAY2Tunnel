@@ -39,6 +39,7 @@
   let stick = true;
   const pendingStream = new Map(); // el -> latest assistant item (coalesced per frame)
   let flushRaf = 0;
+  let usage = null, usagePoll = 0;  // Claude Max-plan usage (from /api/usage)
 
   // new-chat config (persisted)
   let cfg = {
@@ -200,6 +201,7 @@
       if (m.status === 'exited' && stoppedByUs) sysPill('Stopped — send a message to resume.');
       renderMeta();
       if (m.lastResult) renderCost(m.lastResult);
+      if (m.status === 'idle') fetchUsage();   // a turn just burned plan budget — refresh the bar
     }
   }
 
@@ -391,6 +393,74 @@
     if (!lr || lr.costUsd == null) return;
     const sec = lr.durationMs ? (lr.durationMs / 1000).toFixed(1) + 's' : '';
     $('meta-cost').textContent = `$${lr.costUsd.toFixed(4)} · ${sec}`;
+  }
+
+  // ── Claude Max-plan usage ─────────────────────────────────────────────────
+  // StanChat is Claude Code on a Max plan — the per-turn "$" is API-equivalent
+  // (handy for the API-billed bots), but the real budget is the plan's rolling
+  // limits. `/api/usage` proxies them (token stays server-side). Pill in the
+  // composer + a full breakdown in the drawer.
+  const usageTone = p => (p == null ? '' : p >= 90 ? 'crit' : p >= 70 ? 'warn' : 'ok');
+  function fmtReset(iso) {
+    if (!iso) return '';
+    const ms = new Date(iso).getTime() - Date.now();
+    if (!(ms > 0)) return 'resetting…';
+    const m = Math.round(ms / 60000), h = Math.floor(m / 60), d = Math.floor(h / 24);
+    if (d >= 1) return `resets in ${d}d ${h % 24}h`;
+    if (h >= 1) return `resets in ${h}h ${m % 60}m`;
+    return `resets in ${m}m`;
+  }
+  async function fetchUsage() {
+    try {
+      const r = await api('/api/usage');
+      if (!r.ok) return;                 // 503/502 until the server picks up the new route
+      const u = await r.json();
+      if (u && !u.error) { usage = u; renderUsagePill(); if ($('usage-view')) renderUsage(); }
+    } catch {}
+  }
+  function renderUsagePill() {
+    const pill = $('usage-pill'); if (!pill) return;
+    const s = usage && usage.session;
+    if (!s || s.pct == null) { pill.hidden = true; return; }
+    pill.hidden = false;
+    pill.className = 'meta-usage ' + usageTone(s.pct);
+    pill.innerHTML =
+      `<span class="mu-k">plan</span>` +
+      `<span class="mu-track"><i style="width:${Math.min(100, s.pct)}%"></i></span>` +
+      `<span class="mu-pct">${s.pct}%</span>`;
+    pill.title = `Claude ${usage.plan || 'Max'} · session ${s.pct}% · ${fmtReset(s.resetsAt)}`;
+  }
+  // Drawer breakdown — one bar per window the API reports.
+  function renderUsage() {
+    $('drawer-title').textContent = 'Plan usage';
+    const body = $('drawer-body');
+    const bar = (label, w) => {
+      if (!w || w.pct == null) return '';
+      const p = Math.min(100, w.pct);
+      return `<div class="ubar ${usageTone(w.pct)}">
+        <div class="ubar-top"><span class="ubar-label">${esc(label)}</span><span class="ubar-pct">${w.pct}%</span></div>
+        <div class="ubar-track"><i style="width:${p}%"></i></div>
+        <div class="ubar-reset">${esc(fmtReset(w.resetsAt))}</div>
+      </div>`;
+    };
+    if (!usage) { body.innerHTML = '<div class="mode-note">Loading usage…</div>'; fetchUsage(); return; }
+    body.innerHTML = `<div id="usage-view">
+      <div class="usage-plan"><span class="usage-plan-badge">Claude ${esc((usage.plan || 'max').replace(/^\w/, c => c.toUpperCase()))}</span>${usage.stale ? '<span class="usage-stale">cached</span>' : ''}</div>
+      ${bar('Session · 5-hour window', usage.session)}
+      ${bar('Week · all models', usage.week)}
+      ${bar('Week · Opus', usage.weekOpus)}
+      ${bar('Week · Sonnet', usage.weekSonnet)}
+      <div class="mode-note">Max-plan limits reset on a rolling window — no per-token billing. The “$” on the composer is the API-equivalent cost of this one session (useful next to the API-billed bots).</div>
+      <button class="opt wide" id="usage-refresh">↻ Refresh</button>
+      <button class="drawer-cta" id="usage-back">← Back to chats</button>
+    </div>`;
+    const rf = $('usage-refresh'); if (rf) rf.addEventListener('click', () => { rf.disabled = true; rf.textContent = 'Refreshing…'; fetchUsage(); });
+    const bk = $('usage-back'); if (bk) bk.addEventListener('click', () => renderSessions());
+  }
+  function startUsagePoll() {
+    fetchUsage();
+    if (usagePoll) clearInterval(usagePoll);
+    usagePoll = setInterval(() => { if (!document.hidden) fetchUsage(); }, 90000);
   }
 
   // One rAF that paints any queued streaming prose AND follows the bottom — at
@@ -658,6 +728,7 @@
     $('drawer').classList.remove('hidden');
     if (mode === 'new') renderNewChat();
     else if (mode === 'settings') renderSettings();
+    else if (mode === 'usage') renderUsage();
     else renderSessions();
   }
   function closeDrawer() { $('drawer').classList.add('hidden'); }
@@ -969,6 +1040,7 @@
     sessionId = localStorage.getItem(LS.last) || null;
     if (sessionId) connect(false); else setStatus('— tap + to start');
     updateSendDim();
+    startUsagePoll();
   }
 
   function init() {
@@ -986,6 +1058,7 @@
     });
     $('menu-btn').addEventListener('click', () => openDrawer('sessions'));
     $('new-btn').addEventListener('click', () => openDrawer('new'));
+    const up = $('usage-pill'); if (up) up.addEventListener('click', () => openDrawer('usage'));
     $('bolt-btn').addEventListener('click', () => startAuto());
     $('fleet-btn').addEventListener('click', openFleet);
     $('fleet-close').addEventListener('click', closeFleet);
@@ -1080,6 +1153,7 @@
         <div id="composer-meta">
           <button class="meta-chip" id="chip-project"><span class="meta-chip-k">dir</span><span id="chip-project-v">~</span></button>
           <button class="meta-chip" id="chip-mode"><span class="meta-chip-k">mode</span><span id="chip-mode-v">Plan</span></button>
+          <button class="meta-usage" id="usage-pill" aria-label="Claude plan usage" hidden></button>
           <span class="meta-cost" id="meta-cost"></span>
         </div>
         <div id="attach-tray"></div>
@@ -1128,7 +1202,7 @@
   function show() {
     try {
       if (token && sessionId && (!ws || ws.readyState > 1)) { reconnectDelay = 500; connect(false); }
-      stick = true; scheduleFlush();
+      stick = true; scheduleFlush(); fetchUsage();
     } catch {}
   }
   window.StanChat = { mount, show };

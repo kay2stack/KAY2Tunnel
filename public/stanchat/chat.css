@@ -339,7 +339,45 @@ a:active { opacity: .7; }
 }
 .meta-chip:active { border-color: var(--accent); }
 .meta-chip-k { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
-.meta-cost { margin-left: auto; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+.meta-cost { font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+
+/* ── Claude Max-plan usage pill (composer) ───────────────────────── */
+.meta-usage {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px;
+  background: var(--bg-secondary); border: 1px solid var(--border);
+  border-radius: var(--r-pill); padding: 4px 9px 4px 8px; cursor: pointer;
+  transition: border-color var(--dur-fast);
+}
+.meta-usage:active { transform: scale(.96); }
+.meta-usage[hidden] { display: none; }
+.meta-usage .mu-k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim); font-weight: 700; }
+.meta-usage .mu-track { width: 38px; height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+.meta-usage .mu-track i { display: block; height: 100%; border-radius: 3px; background: var(--accent); transition: width .4s ease; }
+.meta-usage .mu-pct { font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); min-width: 26px; text-align: right; }
+.meta-usage.warn { border-color: var(--amber); }
+.meta-usage.warn .mu-track i { background: var(--amber); }
+.meta-usage.crit { border-color: var(--red); }
+.meta-usage.crit .mu-track i { background: var(--red); }
+.meta-usage.crit .mu-pct { color: var(--red); }
+
+/* ── Plan-usage drawer breakdown ─────────────────────────────────── */
+.usage-plan { display: flex; align-items: center; gap: 8px; margin: 2px 2px 14px; }
+.usage-plan-badge {
+  font-size: 12px; font-weight: 800; letter-spacing: .02em; color: var(--accent);
+  background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--r-pill); padding: 4px 12px;
+}
+.usage-stale { font-size: 11px; color: var(--text-dim); }
+.ubar { margin: 0 2px 16px; }
+.ubar-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; }
+.ubar-label { font-size: 13px; color: var(--text-secondary); font-weight: 600; }
+.ubar-pct { font-size: 14px; font-family: var(--font-mono); color: var(--text-primary); font-weight: 700; }
+.ubar-track { height: 9px; border-radius: 5px; background: var(--border); overflow: hidden; }
+.ubar-track i { display: block; height: 100%; border-radius: 5px; background: var(--accent); transition: width .5s ease; }
+.ubar-reset { margin-top: 5px; font-size: 11px; color: var(--text-dim); font-family: var(--font-mono); }
+.ubar.warn .ubar-track i { background: var(--amber); }
+.ubar.warn .ubar-pct { color: var(--amber); }
+.ubar.crit .ubar-track i { background: var(--red); }
+.ubar.crit .ubar-pct { color: var(--red); }
 #composer-row {
   display: flex; align-items: flex-end; gap: 8px;
   background: var(--bg-input); border: 1.5px solid var(--border);
