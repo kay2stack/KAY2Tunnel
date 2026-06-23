@@ -508,6 +508,58 @@
     closeDrawer(); clearThread(); stick = true; connect(false);
   }
 
+  // ── Voice input — on-device dictation (whisper.cpp on the Pi) ──────────────
+  let mediaRec = null, micChunks = [], micStream = null, recording = false;
+  async function initVoice() {
+    const mic = $('mic-btn'); if (!mic) return;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) return;
+    try {
+      const r = await api('/api/voice/status');
+      if (!r.ok) return;                       // route not live yet (pre-restart)
+      const s = await r.json();
+      if (!s || !s.available) return;          // engine not built → leave mic hidden
+    } catch { return; }
+    mic.hidden = false;
+    mic.addEventListener('click', toggleRecord);
+  }
+  async function toggleRecord() {
+    if (recording) return stopRecord();
+    try { micStream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+    catch { sysPill('Microphone permission denied', 'error'); return; }
+    micChunks = [];
+    try { mediaRec = new MediaRecorder(micStream); } catch { sysPill('Recording unsupported here', 'error'); return; }
+    mediaRec.ondataavailable = e => { if (e.data && e.data.size) micChunks.push(e.data); };
+    mediaRec.onstop = onRecStop;
+    mediaRec.start();
+    recording = true; haptic(12);
+    const mic = $('mic-btn'); mic.classList.add('recording'); mic.title = 'Tap to stop';
+  }
+  function stopRecord() {
+    recording = false;
+    const mic = $('mic-btn'); if (mic) { mic.classList.remove('recording'); mic.title = 'Tap to dictate'; }
+    try { mediaRec && mediaRec.state !== 'inactive' && mediaRec.stop(); } catch {}
+    try { micStream && micStream.getTracks().forEach(t => t.stop()); } catch {}
+  }
+  async function onRecStop() {
+    const mic = $('mic-btn');
+    if (!micChunks.length) return;
+    const type = (mediaRec && mediaRec.mimeType) || 'audio/webm';
+    const blob = new Blob(micChunks, { type });
+    micChunks = [];
+    mic.classList.add('busy'); mic.disabled = true;
+    try {
+      const fd = new FormData();
+      fd.append('audio', blob, 'rec.' + (type.includes('mp4') || type.includes('mpeg') ? 'm4a' : 'webm'));
+      const j = await api('/api/voice/transcribe', { method: 'POST', body: fd }).then(r => r.json());
+      if (j && j.text) {
+        const ta = $('prompt');
+        ta.value = (ta.value.trim() ? ta.value.trim() + ' ' : '') + j.text;
+        autoGrow(ta); updateSendDim(); ta.focus(); haptic(10);
+      } else if (j && j.error) { sysPill('Could not transcribe', 'error'); }
+    } catch { sysPill('Transcription failed', 'error'); }
+    finally { mic.classList.remove('busy'); mic.disabled = false; }
+  }
+
   // One rAF that paints any queued streaming prose AND follows the bottom — at
   // most once per frame no matter how many deltas arrived, and only scrolling
   // when the reader is still stuck to the bottom.
@@ -1099,6 +1151,7 @@
     if (sessionId) connect(false); else setStatus('— tap + to start');
     updateSendDim();
     startUsagePoll();
+    initVoice();
   }
 
   function init() {
@@ -1228,6 +1281,9 @@
           <input id="file-input" type="file" multiple accept="image/*,.txt,.md,.json,.js,.ts,.py,.sh,.css,.html,.csv,.log,.pdf,.yml,.yaml,.toml" hidden>
           <button id="attach-btn" aria-label="Attach files" title="Attach files & photos">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+          </button>
+          <button id="mic-btn" aria-label="Voice input" title="Tap to dictate" hidden>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
           </button>
           <textarea id="prompt" rows="1" placeholder="Message StanAI…  (/auto = autopilot)" spellcheck="false"></textarea>
           <button id="send-btn" aria-label="Send">

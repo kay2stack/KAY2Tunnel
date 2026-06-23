@@ -18,6 +18,7 @@ const androidRouter = require('./android');
 const opsRouter = require('./ops');
 const chat = require('./chat');
 const usage = require('./usage');
+const voice = require('./voice');
 const system = require('./system');
 
 const app = express();
@@ -138,6 +139,7 @@ app.use('/api/android', androidRouter);
 app.use('/api/ops', opsRouter);
 app.use('/api/chat', chat.router);
 app.use('/api/usage', usage.router);
+app.use('/api/voice', voice.router);
 app.use('/api/push', push.router);
 app.get('/api/system', (req, res) => res.json({ cpu: system.cpu(), mem: system.mem(), load: system.load(), temp: system.temp(), uptime: system.uptime() }));
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
