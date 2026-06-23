@@ -312,11 +312,24 @@ server.on('upgrade', (req, socket, head) => {
 });
 
 let _shuttingDown = false;
+let _bootNotified = false;
 function bindServer() {
   if (server.listening) return;
   server.listen(PORT, HOST, () => {
     const addr = server.address();
     console.log(`Stan CLI v4.2 — http://${addr.address}:${addr.port}`);
+    // Boot/reboot push: a low system uptime means the whole Pi just came back;
+    // otherwise it's a plain StanCLI restart. Once per process (not per rebind).
+    if (!_bootNotified) {
+      _bootNotified = true;
+      const up = system.uptime() || 0;
+      const reboot = up > 0 && up < 300;
+      push.notify({
+        title: reboot ? '🔌 kay2 Pi rebooted' : '♻️ StanCLI restarted',
+        body: reboot ? 'The Pi came back online — StanCLI is up.' : 'StanCLI server is back online.',
+        tag: 'boot', url: '/stanchat/',
+      }).catch(() => {});
+    }
   });
 }
 server.on('close', () => {

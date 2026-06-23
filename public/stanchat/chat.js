@@ -196,11 +196,12 @@
     } else if (m.type === 'item') {
       renderItem(m.item);
       scheduleFlush();
+    } else if (m.type === 'tokens') {
+      renderLiveTokens(m.n);
     } else if (m.type === 'status') {
       if (meta) { meta.status = m.status; if (m.lastResult) meta.lastResult = m.lastResult; }
       if (m.status === 'exited' && stoppedByUs) sysPill('Stopped — send a message to resume.');
       if (m.status === 'thinking') showTyping(); else hideTyping();
-      if (typeof m.liveTokens === 'number') renderLiveTokens(m.liveTokens);
       renderMeta();
       if (m.lastResult) renderCost(m.lastResult);
       if (m.status === 'idle') fetchUsage();   // a turn just burned plan budget — refresh the bar

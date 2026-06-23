@@ -117,6 +117,9 @@ class ChatSession {
     this._iid = 0;
     this._stream = null;          // current streaming assistant item
     this._everStarted = false;
+    this._liveTok = 0;            // running output-token estimate for the current turn
+    this._tokAt = 0;              // last live-token broadcast (throttle)
+    this._restarting = false;     // intentional respawn (model switch) — suppress 'exited'
     this._spawn(false);
   }
 
@@ -202,11 +205,18 @@ class ChatSession {
       }
     });
     this.proc.on('exit', (code) => {
+      const wasBusy = this.busy;
       this.proc = null;
       this.busy = false;
       this._stream = null;
+      if (this._restarting) { this._restarting = false; this.status = 'idle'; return; }  // model switch — not a real exit
       this.status = 'exited';
       this._broadcast({ type: 'status', status: this.status, lastResult: this.lastResult, exitCode: code });
+      // Crashed mid-turn (Claude/Pi hiccup) → alert; it's resumable on the next send.
+      if (wasBusy && code) {
+        this._push({ t: 'system', level: 'error', text: 'Claude stopped unexpectedly (exit ' + code + '). Resend to resume — full context is kept.' });
+        try { push.notify({ title: 'Stan · ' + this.name, body: 'Claude stopped mid-task — resend to resume.', tag: 'crash-' + this.id, url: '/stanchat/?c=' + this.id }); } catch {}
+      }
     });
     this.proc.on('error', (e) => {
       this.status = 'error';
@@ -219,6 +229,32 @@ class ChatSession {
   _ensureProc() {
     if (this.proc) return;
     this._spawn(this._everStarted);   // resume if we've run before
+  }
+
+  // Live running output-token count while a turn builds (throttled).
+  _emitTokens() {
+    const t = now();
+    if (t - this._tokAt < 350) return;
+    this._tokAt = t;
+    this._broadcast({ type: 'tokens', n: this._liveTok });
+  }
+
+  // Switch the model for subsequent turns. The model is a spawn arg, so we drop
+  // the idle proc and let the next send() resume the SAME session (--resume keeps
+  // full context) with the new --model. Guarded so the respawn doesn't surface as
+  // a scary "session ended".
+  setModel(model) {
+    model = model ? String(model).slice(0, 80) : null;
+    if (model === this.model) return;
+    this.model = model;
+    if (this.proc && !this.busy) {
+      this._restarting = true;
+      try { this.proc.stdin.end(); } catch {}
+      try { this.proc.kill('SIGTERM'); } catch {}
+      this.proc = null;
+    }
+    this.lastActive = now();
+    this._broadcast({ type: 'meta', meta: this.meta() });
   }
 
   _onStdout(buf) {
@@ -288,6 +324,8 @@ class ChatSession {
       const d = event.delta;
       if (d && d.type === 'text_delta' && this._stream) {
         this._stream.text += d.text || '';
+        this._liveTok += Math.ceil((d.text || '').length / 4);   // ~4 chars/token
+        this._emitTokens();
         this._update(this._stream);
       }
     } else if (event.type === 'content_block_stop') {
@@ -401,6 +439,8 @@ class ChatSession {
 
     this._push({ t: 'user', text: text || '(attachment)', attachments: display });
     this.busy = true; this.status = 'thinking';
+    this._liveTok = 0; this._tokAt = 0;        // fresh token count for this turn
+    this._alertedSilence = false;              // reset watchdog for the new turn
     this._broadcast({ type: 'status', status: this.status });
     const line = JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
     try { this.proc.stdin.write(line); } catch (e) {
@@ -451,6 +491,23 @@ setInterval(() => {
   }
 }, 1000 * 60 * 30).unref?.();
 
+// Health watchdog — a chat stuck "thinking" with no output for a long stretch is
+// probably wedged (Claude/Pi hiccup). Alert once per turn; do NOT kill, since a
+// single long tool (build, install) is legitimately quiet. Real crashes are
+// caught by the proc 'exit' handler, which pushes + leaves the chat resumable.
+const SILENCE_MS = 8 * 60 * 1000;
+setInterval(() => {
+  const t = now();
+  for (const s of sessions.values()) {
+    if (s.busy && s.status === 'thinking' && s.proc && (t - s.lastActive) > SILENCE_MS && !s._alertedSilence) {
+      s._alertedSilence = true;
+      const mins = Math.round((t - s.lastActive) / 60000);
+      s._push({ t: 'system', level: 'warn', text: `Still working — no update for ${mins}m. Tap Stop if it looks wedged.` });
+      try { push.notify({ title: 'Stan · ' + s.name, body: `Working ${mins}m with no update — tap to check.`, tag: 'silence-' + s.id, url: '/stanchat/?c=' + s.id }); } catch {}
+    }
+  }
+}, 60 * 1000).unref?.();
+
 // ── WebSocket ───────────────────────────────────────────────────────────────
 function handleChatWs(ws, req) {
   const url = new URL(req.url, 'http://x');
@@ -472,8 +529,9 @@ function handleChatWs(ws, req) {
 
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw.toString()); } catch { return; }
-    if (m.type === 'send')      session.send(m.text, m.attachments);
-    else if (m.type === 'kill') session.kill();
+    if (m.type === 'send')          session.send(m.text, m.attachments);
+    else if (m.type === 'kill')     session.kill();
+    else if (m.type === 'setModel') session.setModel(m.model);
   });
   ws.on('close', () => session.detach(ws));
   ws.on('error', () => session.detach(ws));
