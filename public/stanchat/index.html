@@ -9,8 +9,9 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="Stan Chat">
-  <link rel="apple-touch-icon" href="/icons/icon-192.png">
-  <link rel="icon" type="image/svg+xml" href="/brand/icon.svg">
+  <link rel="apple-touch-icon" href="./icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="stylesheet" href="/brand/tokens.css">
   <link rel="stylesheet" href="./chat.css">
   <script>
@@ -46,6 +47,9 @@
       <div class="topbar-name" id="chat-name">Stan Chat</div>
       <div class="topbar-sub" id="chat-status"><span class="status-dot" id="status-dot"></span><span id="status-text">offline</span></div>
     </div>
+    <button class="icon-btn" id="fleet-btn" aria-label="Fleet" title="Agent fleet">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+    </button>
     <button class="icon-btn bolt" id="bolt-btn" aria-label="Quick auto session" title="Quick auto session">
       <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M13 2 4.5 13.5H11l-1 8.5L19.5 10H13z"/></svg>
     </button>
@@ -78,7 +82,12 @@
         <button class="meta-chip" id="chip-mode"><span class="meta-chip-k">mode</span><span id="chip-mode-v">Plan</span></button>
         <span class="meta-cost" id="meta-cost"></span>
       </div>
+      <div id="attach-tray"></div>
       <div id="composer-row">
+        <input id="file-input" type="file" multiple accept="image/*,.txt,.md,.json,.js,.ts,.py,.sh,.css,.html,.csv,.log,.pdf,.yml,.yaml,.toml" hidden>
+        <button id="attach-btn" aria-label="Attach files" title="Attach files & photos">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+        </button>
         <textarea id="prompt" rows="1" placeholder="Message StanAI…  (/auto = autopilot)" spellcheck="false"></textarea>
         <button id="send-btn" aria-label="Send">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
@@ -86,6 +95,15 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- ── Fleet — live grid of agents + fan-out launcher ──── -->
+<div id="fleet" class="hidden">
+  <header class="fleet-head">
+    <div class="fleet-title">Agent Fleet</div>
+    <button class="text-btn" id="fleet-close">Done</button>
+  </header>
+  <div id="fleet-body"></div>
 </div>
 
 <!-- ── Sessions / new-chat drawer ──────────────────────── -->

@@ -742,7 +742,12 @@ const App = (() => {
 
   function init() {
     document.querySelectorAll('.tab-btn').forEach(btn =>
-      btn.addEventListener('click', () => showTab(btn.dataset.tab))
+      btn.addEventListener('click', () => {
+        // A nav button can either switch an in-app tab or jump to a sibling app
+        // (e.g. the standalone Stan Chat) via data-href.
+        if (btn.dataset.href) { location.href = btn.dataset.href; return; }
+        showTab(btn.dataset.tab);
+      })
     );
 
     // Pause polling when the PWA is backgrounded (phone lock / app switch);

@@ -19,6 +19,10 @@
   let meta = null;
   let pendingNew = null;    // one-shot config override for the next forNew connect (quick-auto)
   let queuedFirst = null;   // first message to fire once a freshly-spawned session is live
+  let pending = [];         // staged attachments: {name,isImage,mediaType,blob,url}
+  let awaitMeta = null;     // one-shot resolver, fires with sessionId once a session is live
+  let fleetPoll = null;     // fleet-grid refresh interval
+  const fanDirs = new Set();// fan-out: selected target dirs
   const items = new Map();     // iid -> element
   const toolCards = new Map(); // toolId -> card element
 
@@ -122,6 +126,7 @@
       meta = m.meta; sessionId = meta.id;
       localStorage.setItem(LS.last, sessionId);
       renderMeta();
+      if (awaitMeta) { const r = awaitMeta; awaitMeta = null; r(sessionId); }
       if (queuedFirst && ws && ws.readyState === 1) {
         ws.send(JSON.stringify({ type: 'send', text: queuedFirst }));
         queuedFirst = null;
@@ -166,7 +171,19 @@
       wireCopies(el);
     } else if (it.t === 'user') {
       el.className = 'turn user';
-      el.innerHTML = `<div class="user-msg">${esc(it.text).replace(/\n/g, '<br>')}</div>`;
+      let html = '';
+      const atts = it.attachments || [];
+      if (atts.length) {
+        html += '<div class="user-atts">' + atts.map(a =>
+          a.isImage
+            ? `<img class="user-att-img" data-att="${esc(a.name)}" alt="${esc(a.name)}">`
+            : `<span class="user-att-file">📄 ${esc(a.name)}</span>`
+        ).join('') + '</div>';
+      }
+      if (it.text && it.text !== '(attachment)')
+        html += `<div class="user-msg">${esc(it.text).replace(/\n/g, '<br>')}</div>`;
+      el.innerHTML = html;
+      el.querySelectorAll('[data-att]').forEach(img => thumbFor(img, img.dataset.att));
     } else if (it.t === 'thinking') {
       el.className = 'turn thinking';
       el.innerHTML =
@@ -336,17 +353,133 @@
     connect(true);
   }
 
+  // ── Attachments (phone & device files → straight into the session) ────────
+  // Images are downscaled in the browser to Claude's sweet-spot (≤1568px) so a
+  // 4 MB phone photo becomes a ~150 KB upload; other files ride as-is.
+  function downscaleImage(file) {
+    return new Promise((resolve, reject) => {
+      const u = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(u);
+        const MAX = 1568;
+        let w = img.naturalWidth, h = img.naturalHeight;
+        const scale = Math.min(1, MAX / Math.max(w, h));
+        w = Math.round(w * scale); h = Math.round(h * scale);
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        const png = /png/i.test(file.type);
+        const type = png ? 'image/png' : 'image/jpeg';
+        c.toBlob(b => b ? resolve({ blob: b, type, name: file.name.replace(/\.\w+$/, '') + (png ? '.png' : '.jpg') })
+                        : reject(new Error('encode')), type, 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(u); reject(new Error('load')); };
+      img.src = u;
+    });
+  }
+
+  async function addFiles(fileList) {
+    for (const f of Array.from(fileList || [])) {
+      if (pending.length >= 8) break;
+      if (/^image\//.test(f.type)) {
+        try {
+          const { blob, type, name } = await downscaleImage(f);
+          pending.push({ name, isImage: true, mediaType: type, blob, url: URL.createObjectURL(blob) });
+        } catch {
+          pending.push({ name: f.name, isImage: true, mediaType: f.type, blob: f, url: URL.createObjectURL(f) });
+        }
+      } else {
+        pending.push({ name: f.name, isImage: false, mediaType: f.type || 'application/octet-stream', blob: f, url: null });
+      }
+    }
+    renderTray();
+  }
+
+  function renderTray() {
+    const tray = $('attach-tray'); if (!tray) return;
+    tray.innerHTML = pending.map((p, i) =>
+      p.isImage
+        ? `<div class="att-chip img"><img src="${p.url}" alt=""><button class="att-x" data-x="${i}">✕</button></div>`
+        : `<div class="att-chip"><span class="att-ico">📄</span><span class="att-nm">${esc(p.name)}</span><button class="att-x" data-x="${i}">✕</button></div>`
+    ).join('');
+    tray.classList.toggle('show', pending.length > 0);
+    tray.querySelectorAll('[data-x]').forEach(b => b.addEventListener('click', () => {
+      const i = +b.dataset.x, p = pending[i];
+      if (p && p.url) URL.revokeObjectURL(p.url);
+      pending.splice(i, 1); renderTray();
+    }));
+  }
+
+  // Lazy-load a stored attachment thumbnail with the bearer token (an <img src>
+  // can't carry auth headers, so fetch → blob URL instead).
+  function thumbFor(img, name) {
+    if (!sessionId) return;
+    api(`/api/chat/${sessionId}/file/${encodeURIComponent(name)}`)
+      .then(r => r.ok ? r.blob() : null)
+      .then(b => { if (b) img.src = URL.createObjectURL(b); })
+      .catch(() => {});
+  }
+
+  // Guarantee a live session exists (creating one if needed) and resolve its id.
+  function ensureSession() {
+    if (sessionId && ws && ws.readyState === 1) return Promise.resolve(sessionId);
+    return new Promise(resolve => {
+      let done = false;
+      const finish = id => { if (!done) { done = true; resolve(id); } };
+      awaitMeta = finish;
+      connect(!sessionId);
+      setTimeout(() => { awaitMeta = null; finish(sessionId); }, 6000);
+    });
+  }
+
   // ── Composer ──────────────────────────────────────────
-  function send() {
+  async function send() {
     const ta = $('prompt');
     const text = ta.value.trim();
-    if (!text) return;
-    // /auto [message] → launch a fresh autopilot session (and send the message)
-    const cmd = text.match(/^\/auto\b[ \t]*([\s\S]*)$/i);
-    if (cmd) { ta.value = ''; autoGrow(ta); startAuto(cmd[1]); return; }
-    if (!ws || ws.readyState !== 1) { connect(!sessionId); setTimeout(send, 400); return; }
-    ws.send(JSON.stringify({ type: 'send', text }));
+    if (!text && !pending.length) return;
+
+    // /auto launches a fresh autopilot session — but only when sending plain
+    // text; with attachments staged we just deliver them to the current chat.
+    if (!pending.length) {
+      const cmd = text.match(/^\/auto\b[ \t]*([\s\S]*)$/i);
+      if (cmd) { ta.value = ''; autoGrow(ta); startAuto(cmd[1]); return; }
+      if (!ws || ws.readyState !== 1) { connect(!sessionId); setTimeout(send, 400); return; }
+      ws.send(JSON.stringify({ type: 'send', text }));
+      ta.value = ''; autoGrow(ta);
+      return;
+    }
+
+    // Attachments: ensure a session, upload the bytes, then send text + refs.
+    const sendBtn = $('send-btn'); sendBtn.disabled = true;
+    const atts = pending.slice();
     ta.value = ''; autoGrow(ta);
+    pending = []; renderTray();
+    try {
+      const id = await ensureSession();
+      if (!id) throw new Error('no session');
+      const fd = new FormData();
+      atts.forEach(a => fd.append('files', a.blob, a.name));
+      const { files } = await api(`/api/chat/${id}/attach`, { method: 'POST', body: fd }).then(r => r.json());
+      const refs = (files || []).map(f => ({ name: f.name, isImage: f.isImage, mediaType: f.mediaType }));
+      if (ws && ws.readyState === 1) {
+        ws.send(JSON.stringify({ type: 'send', text, attachments: refs }));
+      } else {
+        await api(`/api/chat/${id}/send`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, attachments: refs }),
+        });
+      }
+    } catch (e) {
+      const t = $('thread');
+      const pill = document.createElement('div');
+      pill.className = 'turn system error';
+      pill.innerHTML = `<div class="sys-pill">Attachment failed: ${esc(e.message)}</div>`;
+      t.appendChild(pill); scrollDown(true);
+    } finally {
+      atts.forEach(a => { if (a.url) URL.revokeObjectURL(a.url); });
+      sendBtn.disabled = false;
+    }
   }
   function autoGrow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 140) + 'px'; }
 
@@ -427,6 +560,121 @@
     });
   }
 
+  // ── Fleet — live grid of every agent + one-prompt fan-out ─────────────────
+  async function openFleet() {
+    $('fleet').classList.remove('hidden');
+    await renderFleet();
+    if (fleetPoll) clearInterval(fleetPoll);
+    fleetPoll = setInterval(refreshFleet, 3000);
+  }
+  function closeFleet() {
+    $('fleet').classList.add('hidden');
+    if (fleetPoll) { clearInterval(fleetPoll); fleetPoll = null; }
+  }
+
+  async function renderFleet() {
+    const body = $('fleet-body');
+    let dirs = [{ label: 'Home', path: '' }];
+    try { dirs = await api('/api/agents/launch-dirs').then(r => r.json()); } catch {}
+    const dirChips = dirs.map(d => {
+      const label = d.label || (d.path ? d.path.split('/').pop() : 'Home');
+      return `<button class="fan-dir" data-dir="${esc(d.path || '')}" data-label="${esc(label)}">${esc(label)}</button>`;
+    }).join('');
+    const modeChips = MODES.map(m => `<button class="fan-mode${m.v === cfg.mode ? ' sel' : ''}" data-mode="${m.v}">${esc(m.label)}</button>`).join('');
+    body.innerHTML = `
+      <div class="fan-card">
+        <div class="fan-title">⚡ Fan-out — one task, many agents</div>
+        <textarea class="fan-prompt" id="fan-prompt" rows="2" placeholder="A task to run across every selected folder… (leave blank to just spawn idle agents)"></textarea>
+        <div class="fan-label">Targets</div>
+        <div class="fan-dirs">${dirChips}</div>
+        <div class="fan-label">Mode</div>
+        <div class="fan-modes">${modeChips}</div>
+        <button class="drawer-cta" id="fan-go">Launch agents</button>
+      </div>
+      <div class="fleet-grid-label">Live agents</div>
+      <div id="fleet-grid"><div class="fleet-empty">Loading…</div></div>`;
+
+    let fanMode = cfg.mode;
+    fanDirs.clear();
+    body.querySelectorAll('[data-dir]').forEach(b => b.addEventListener('click', () => {
+      const k = b.dataset.dir;
+      if (fanDirs.has(k)) fanDirs.delete(k); else fanDirs.add(k);
+      b.classList.toggle('sel', fanDirs.has(k));
+    }));
+    body.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+      fanMode = b.dataset.mode;
+      body.querySelectorAll('[data-mode]').forEach(x => x.classList.toggle('sel', x === b));
+    }));
+    $('fan-go').addEventListener('click', () => {
+      const text = $('fan-prompt').value.trim();
+      const chosen = [...body.querySelectorAll('.fan-dir.sel')].map(b => ({ path: b.dataset.dir, label: b.dataset.label }));
+      const go = $('fan-go');
+      if (!chosen.length) { go.textContent = 'Pick at least one target'; setTimeout(() => go.textContent = 'Launch agents', 1500); return; }
+      doFanOut(text, chosen, fanMode);
+    });
+    await refreshFleet();
+  }
+
+  async function doFanOut(text, dirs, mode) {
+    const btn = $('fan-go');
+    if (btn) { btn.disabled = true; btn.textContent = `Launching ${dirs.length}…`; }
+    await Promise.all(dirs.map(async d => {
+      try {
+        const { id } = await api('/api/chat', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: text ? text.slice(0, 28) : (d.label || 'Agent'), cwd: d.path, mode, model: cfg.model }),
+        }).then(r => r.json());
+        if (id && text) await api(`/api/chat/${id}/send`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+        });
+      } catch {}
+    }));
+    if ($('fan-prompt')) $('fan-prompt').value = '';
+    document.querySelectorAll('.fan-dir.sel').forEach(b => b.classList.remove('sel'));
+    fanDirs.clear();
+    if (btn) { btn.disabled = false; btn.textContent = 'Launch agents'; }
+    refreshFleet();
+  }
+
+  async function refreshFleet() {
+    const grid = $('fleet-grid'); if (!grid) return;
+    let list = [];
+    try { list = await api('/api/chat').then(r => r.json()); } catch { return; }
+    if (!list.length) { grid.innerHTML = '<div class="fleet-empty">No agents yet. Fan out a task above, or start a chat.</div>'; return; }
+    grid.innerHTML = list.map(fleetCard).join('');
+    grid.querySelectorAll('[data-open]').forEach(c => c.addEventListener('click', e => {
+      if (e.target.closest('[data-del]')) return;
+      sessionId = c.dataset.open; closeFleet(); clearThread(); connect(false);
+    }));
+    grid.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async e => {
+      e.stopPropagation();
+      await api('/api/chat/' + b.dataset.del, { method: 'DELETE' }).catch(() => {});
+      if (b.dataset.del === sessionId) { sessionId = null; localStorage.removeItem(LS.last); }
+      refreshFleet();
+    }));
+  }
+
+  function fleetCard(s) {
+    const st = s.status || 'idle';
+    const dotClass = st === 'thinking' ? 'thinking' : (st === 'exited' || st === 'error') ? 'exited' : 'idle';
+    const statLabel = st === 'thinking' ? 'working…' : st === 'idle' ? 'ready' : st === 'exited' ? 'ended' : st;
+    const dir = (s.cwd || '~').split('/').pop() || '~';
+    const cost = s.lastResult && s.lastResult.costUsd != null ? `$${s.lastResult.costUsd.toFixed(3)}` : '';
+    return `<div class="fleet-card" data-open="${esc(s.id)}">
+      <div class="fleet-card-top">
+        <span class="fleet-orb">◉</span>
+        <div class="fleet-card-id">
+          <div class="fleet-card-name">${esc(s.name || 'Chat')}</div>
+          <div class="fleet-card-meta">${esc(dir)} · ${esc(modeLabel(s.permMode))}</div>
+        </div>
+        <span class="status-dot ${dotClass}"></span>
+        <button class="fleet-del" data-del="${esc(s.id)}">✕</button>
+      </div>
+      <div class="fleet-card-last">${esc(s.lastText || '—')}</div>
+      <div class="fleet-card-foot"><span>${esc(statLabel)}</span><span>${cost ? esc(cost) + ' · ' : ''}${esc(timeAgo(s.lastActive))}</span></div>
+    </div>`;
+  }
+
   function timeAgo(ts) {
     const s = Math.floor((Date.now() - ts) / 1000);
     if (s < 60) return 'just now';
@@ -470,9 +718,20 @@
     $('menu-btn').addEventListener('click', () => openDrawer('sessions'));
     $('new-btn').addEventListener('click', () => openDrawer('new'));
     $('bolt-btn').addEventListener('click', () => startAuto());
+    $('fleet-btn').addEventListener('click', openFleet);
+    $('fleet-close').addEventListener('click', closeFleet);
     const ea = $('empty-auto'); if (ea) ea.addEventListener('click', () => startAuto());
     $('drawer-close').addEventListener('click', closeDrawer);
     $('drawer-scrim').addEventListener('click', closeDrawer);
+
+    // Attachments: tap the clip → device picker (Photos / Camera / Files on iOS);
+    // also accept pasted images straight into the composer.
+    $('attach-btn').addEventListener('click', () => $('file-input').click());
+    $('file-input').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+    $('prompt').addEventListener('paste', e => {
+      const imgs = Array.from(e.clipboardData?.files || []).filter(f => /^image\//.test(f.type));
+      if (imgs.length) { e.preventDefault(); addFiles(imgs); }
+    });
     $('chip-mode').addEventListener('click', () => openDrawer('new'));
     $('chip-project').addEventListener('click', () => openDrawer('new'));
     $('thread').addEventListener('scroll', updateJump, { passive: true });

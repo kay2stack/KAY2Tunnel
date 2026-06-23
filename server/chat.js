@@ -18,7 +18,18 @@ const { spawn } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const multer = require('multer');
 const { ROOT_DIR } = require('./config');
+
+// Attachments from a phone/device land here (central, outside any repo) so a
+// chat session can hand real files + images straight to Claude Code. Images are
+// also injected inline as base64 image blocks so Claude *sees* them; every file
+// is saved to disk so Claude can Read it with its tools too.
+const UPLOAD_ROOT = path.join(ROOT_DIR, '.stanchat-uploads');
+const upload = multer({ dest: '/tmp/stan-cli-uploads/', limits: { fileSize: 12 * 1024 * 1024, files: 8 } });
+const IMAGE_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp' };
+const mediaTypeFor = n => IMAGE_TYPES[path.extname(String(n || '')).toLowerCase()] || null;
+const safeName = n => (String(n || 'file').replace(/[\\/]/g, '_').replace(/[^\w.\- ]/g, '').slice(0, 120) || 'file');
 
 // Resolve the claude binary robustly — pm2's PATH may not include ~/.local/bin.
 const CLAUDE_BIN = (() => {
@@ -115,7 +126,23 @@ class ChatSession {
       busy: this.busy, lastResult: this.lastResult,
       createdAt: this.createdAt, lastActive: this.lastActive,
       clients: this.clients.size, items: this.transcript.length,
+      lastText: this._lastText(),     // live one-line preview for the fleet grid
     };
+  }
+
+  // Newest meaningful line in the transcript — assistant prose preferred, else
+  // the user's last message — for the fleet card preview.
+  _lastText() {
+    for (let i = this.transcript.length - 1; i >= 0; i--) {
+      const it = this.transcript[i];
+      if (it.t === 'assistant' && it.text && it.text.trim())
+        return it.text.replace(/\s+/g, ' ').trim().slice(0, 160);
+      if (it.t === 'tool_use')
+        return '⚙ ' + (it.name || 'tool') + (it.summary ? ' · ' + it.summary : '');
+      if (it.t === 'user' && it.text && it.text.trim())
+        return '› ' + it.text.replace(/\s+/g, ' ').trim().slice(0, 140);
+    }
+    return '';
   }
 
   _spawn(resume) {
@@ -312,18 +339,53 @@ class ChatSession {
   }
 
   // ── public API ──────────────────────────────────────────────────────────
-  send(text) {
+  // text          — the user's message (may be empty if attachments-only)
+  // attachments[] — [{ name, isImage, mediaType }] already uploaded via /attach;
+  //                 bytes are read from disk here, never trusted from the client.
+  send(text, attachments) {
     text = String(text || '').trim();
-    if (!text) return;
+    const atts = Array.isArray(attachments) ? attachments : [];
+    if (!text && !atts.length) return;
     this._ensureProc();
     if (!this.proc) return;
-    this._push({ t: 'user', text });
+
+    const sessionDir = path.join(UPLOAD_ROOT, this.id);
+    const content = [];        // content blocks sent to Claude
+    const display = [];        // {name,isImage} echoed into the transcript
+    const noteLines = [];      // path hints so Claude can Read non-image files
+
+    for (const a of atts) {
+      const nm = safeName(a && a.name);
+      const abs = path.join(sessionDir, nm);
+      if (!abs.startsWith(sessionDir + path.sep)) continue;   // jail
+      let ok = false; try { ok = fs.statSync(abs).isFile(); } catch {}
+      if (!ok) continue;
+      const mt = mediaTypeFor(nm);
+      if (mt) {
+        try {
+          const data = fs.readFileSync(abs).toString('base64');
+          content.push({ type: 'image', source: { type: 'base64', media_type: mt, data } });
+          noteLines.push(`• image "${nm}" (also saved at ${abs})`);
+          display.push({ name: nm, isImage: true });
+        } catch {}
+      } else {
+        noteLines.push(`• file: ${abs}`);
+        display.push({ name: nm, isImage: false });
+      }
+    }
+
+    let claudeText = text;
+    if (noteLines.length) {
+      claudeText = (text ? text + '\n\n' : '') +
+        'Attached from my device (already on disk — read them with your tools):\n' + noteLines.join('\n');
+    }
+    if (claudeText) content.unshift({ type: 'text', text: claudeText });
+    if (!content.length) return;
+
+    this._push({ t: 'user', text: text || '(attachment)', attachments: display });
     this.busy = true; this.status = 'thinking';
     this._broadcast({ type: 'status', status: this.status });
-    const line = JSON.stringify({
-      type: 'user',
-      message: { role: 'user', content: [{ type: 'text', text }] },
-    }) + '\n';
+    const line = JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n';
     try { this.proc.stdin.write(line); } catch (e) {
       this._push({ t: 'system', level: 'error', text: 'Could not send: ' + e.message });
     }
@@ -344,7 +406,11 @@ class ChatSession {
     this.proc = null;
     this.status = 'exited';
   }
-  destroy() { this.kill(); sessions.delete(this.id); }
+  destroy() {
+    this.kill();
+    try { fs.rmSync(path.join(UPLOAD_ROOT, this.id), { recursive: true, force: true }); } catch {}
+    sessions.delete(this.id);
+  }
 }
 
 // ── manager ─────────────────────────────────────────────────────────────────
@@ -389,7 +455,7 @@ function handleChatWs(ws, req) {
 
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw.toString()); } catch { return; }
-    if (m.type === 'send')      session.send(m.text);
+    if (m.type === 'send')      session.send(m.text, m.attachments);
     else if (m.type === 'kill') session.kill();
   });
   ws.on('close', () => session.detach(ws));
@@ -409,6 +475,48 @@ router.delete('/:id', (req, res) => {
   const s = sessions.get(req.params.id);
   if (!s) return res.status(404).json({ error: 'Not found' });
   s.destroy();
+  res.json({ ok: true });
+});
+
+// Attach files/photos from a device → saved under UPLOAD_ROOT/<sessionId>/.
+// Returns sanitized descriptors; the client passes these back on the next send.
+router.post('/:id/attach', upload.array('files', 8), (req, res) => {
+  const s = sessions.get(req.params.id);
+  if (!s) { (req.files || []).forEach(f => { try { fs.unlinkSync(f.path); } catch {} }); return res.status(404).json({ error: 'No such chat' }); }
+  const dir = path.join(UPLOAD_ROOT, s.id);
+  try { fs.mkdirSync(dir, { recursive: true }); } catch {}
+  const files = [];
+  for (const f of (req.files || [])) {
+    const nm = safeName(f.originalname);
+    const dest = path.join(dir, nm);
+    if (!dest.startsWith(dir + path.sep)) { try { fs.unlinkSync(f.path); } catch {} continue; }
+    try {
+      fs.renameSync(f.path, dest);
+      files.push({ name: nm, isImage: !!mediaTypeFor(nm), mediaType: mediaTypeFor(nm), size: f.size });
+    } catch { try { fs.unlinkSync(f.path); } catch {} }
+  }
+  res.json({ files });
+});
+
+// Serve a stored attachment back (thumbnails / re-view across devices). Jailed.
+router.get('/:id/file/:name', (req, res) => {
+  const s = sessions.get(req.params.id);
+  if (!s) return res.status(404).end();
+  const dir = path.join(UPLOAD_ROOT, s.id);
+  const abs = path.join(dir, safeName(req.params.name));
+  if (!abs.startsWith(dir + path.sep)) return res.status(400).end();
+  fs.stat(abs, (e, st) => {
+    if (e || !st.isFile()) return res.status(404).end();
+    res.sendFile(abs);
+  });
+});
+
+// REST send — used by the fleet fan-out (one prompt → many agents) without
+// opening a WebSocket to each new session.
+router.post('/:id/send', express.json({ limit: '256kb' }), (req, res) => {
+  const s = sessions.get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'No such chat' });
+  s.send(req.body?.text, req.body?.attachments);
   res.json({ ok: true });
 });
 

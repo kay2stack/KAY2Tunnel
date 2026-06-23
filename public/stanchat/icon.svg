@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="34%" r="75%">
+      <stop offset="0%" stop-color="#23121A"/>
+      <stop offset="55%" stop-color="#0C0A10"/>
+      <stop offset="100%" stop-color="#050509"/>
+    </radialGradient>
+    <radialGradient id="orb" cx="42%" cy="38%" r="68%">
+      <stop offset="0%" stop-color="#FF7B92"/>
+      <stop offset="42%" stop-color="#FF3B5C"/>
+      <stop offset="100%" stop-color="#D81E42"/>
+    </radialGradient>
+    <radialGradient id="halo" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#FF3B5C" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#FF3B5C" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#FF3B5C" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <!-- App tile -->
+  <rect width="512" height="512" rx="114" fill="url(#bg)"/>
+  <!-- Soft brand halo behind the orb -->
+  <circle cx="256" cy="248" r="190" fill="url(#halo)"/>
+  <!-- Orb ring -->
+  <circle cx="256" cy="248" r="132" fill="none" stroke="#FF3B5C" stroke-width="10" opacity="0.85"/>
+  <!-- Orb core -->
+  <circle cx="256" cy="248" r="96" fill="url(#orb)"/>
+  <!-- Specular highlight -->
+  <ellipse cx="224" cy="214" rx="34" ry="26" fill="#FFFFFF" opacity="0.35"/>
+</svg>
