@@ -2206,9 +2206,12 @@ body::before {
   .deck-orb { width: 78px; height: 78px; border-radius: 23px; }
   .deck-metrics { grid-template-columns: repeat(2, 1fr); }
 }
-/* Keep the floating dock from covering the Today command deck/feed. */
+/* Keep the floating dock off the Today command deck/feed, and off the Chat tab
+   where it would float right over the composer's input + send button. */
 body[data-tab="home"] #dock-fab,
-body[data-tab="home"] #dock-panel { display: none !important; }
+body[data-tab="home"] #dock-panel,
+body[data-tab="chat"] #dock-fab,
+body[data-tab="chat"] #dock-panel { display: none !important; }
 
 
 /* ── StanCLI v4.2 live ops command centre ───────────────────────── */
