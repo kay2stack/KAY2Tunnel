@@ -159,8 +159,12 @@ app.delete('/api/term/sessions/:id', (req, res) => {
 app.post('/api/term/inject', express.json(), (req, res) => {
   const { text, sessionId, execute } = req.body || {};
   if (!text || typeof text !== 'string') return res.status(400).json({ error: 'text required' });
+  // Auto-pick the most-recent REAL shell — never a chat mirror, or "send to
+  // terminal" would type the command back into Claude instead of a shell.
   const sorted = listSessions().sort((a, b) => b.lastActive - a.lastActive);
-  const session = sessionId ? getSession(sessionId) : sorted.map(s => getSession(s.id)).find(Boolean);
+  const session = sessionId
+    ? getSession(sessionId)
+    : sorted.filter(s => s.type !== 'chat').map(s => getSession(s.id)).find(Boolean);
   if (!session) return res.status(404).json({ error: 'no active terminal session' });
   session.write(text + (execute ? '\r' : ''));
   res.json({ ok: true, sessionId: session.id });
@@ -205,7 +209,7 @@ setExitNotifier(({ name, cwd, exitCode }) => {
   push.notify({
     title: `${label} finished`,
     body: (repo ? `in ${repo}` : 'session ended') + (exitCode ? ` · exit ${exitCode}` : ''),
-    tag: name, url: '/',
+    tag: name, url: '/', category: 'agent',
   });
 });
 
@@ -327,7 +331,7 @@ function bindServer() {
       push.notify({
         title: reboot ? '🔌 kay2 Pi rebooted' : '♻️ StanCLI restarted',
         body: reboot ? 'The Pi came back online — StanCLI is up.' : 'StanCLI server is back online.',
-        tag: 'boot', url: '/stanchat/',
+        tag: 'boot', url: '/stanchat/', category: 'system',
       }).catch(() => {});
     }
   });

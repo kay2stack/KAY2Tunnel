@@ -34,6 +34,7 @@
   const fanDirs = new Set();// fan-out: selected target dirs
   const items = new Map();     // iid -> element
   const toolCards = new Map(); // toolId -> card element
+  let transcript = [];         // raw items (upserted by iid) for /export + /copy
   // Scroll model: follow the live feed ONLY while the reader is pinned to the
   // bottom. The instant they scroll up to read, stop dragging them down.
   let stick = true;
@@ -115,7 +116,11 @@
   }
 
   // ── Auth ──────────────────────────────────────────────
-  function showAuth() { const a = $('auth-screen'), p = $('app'); if (a) a.classList.remove('hidden'); if (p) p.classList.add('hidden'); }
+  function showAuth() {
+    const a = $('auth-screen'), p = $('app'); if (a) a.classList.remove('hidden'); if (p) p.classList.add('hidden');
+    // Offer Face ID only once we confirm a passkey is enrolled for this account.
+    const pk = $('passkey-login'); if (pk) { pk.classList.add('hidden'); pk.disabled = false; passkeyEnrolled().then(en => { if (en) pk.classList.remove('hidden'); }); }
+  }
   function showApp() { const a = $('auth-screen'), p = $('app'); if (a) a.classList.add('hidden'); if (p) p.classList.remove('hidden'); }
 
   async function tryToken(t) {
@@ -137,6 +142,66 @@
   function api(path, opts = {}) {
     return fetch(path, { ...opts, headers: { Authorization: 'Bearer ' + token, ...(opts.headers || {}) } })
       .then(r => { if (r.status === 401) { localStorage.removeItem(LS.token); token = ''; showAuth(); throw new Error('401'); } return r; });
+  }
+
+  // ── Passkey (WebAuthn) ─────────────────────────────────
+  // Passwordless Face ID / Touch ID sign-in on top of the shared token. The
+  // server (server/webauthn.js) hands back the same token on a valid assertion,
+  // so /api + /ws keep working unchanged. Credential private key never leaves
+  // the device (and syncs across Apple devices via iCloud Keychain).
+  const _b64uToBuf = s => { s = String(s).replace(/-/g, '+').replace(/_/g, '/'); s += '='.repeat(s.length % 4 ? 4 - (s.length % 4) : 0);
+    const bin = atob(s), u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; };
+  const _bufToB64u = b => { const u = new Uint8Array(b); let s = ''; for (let i = 0; i < u.length; i++) s += String.fromCharCode(u[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); };
+  const passkeySupported = () => !!(window.PublicKeyCredential && navigator.credentials && navigator.credentials.create);
+  async function passkeyEnrolled() {
+    if (!passkeySupported()) return false;
+    try { const r = await fetch('/api/webauthn/status'); return r.ok && (await r.json()).enrolled === true; } catch { return false; }
+  }
+  async function passkeyLogin() {
+    const r = await fetch('/api/webauthn/auth/options'); if (!r.ok) throw new Error('no passkeys');
+    const o = await r.json(); o.challenge = _b64uToBuf(o.challenge);
+    if (o.allowCredentials) o.allowCredentials = o.allowCredentials.map(c => ({ ...c, id: _b64uToBuf(c.id) }));
+    const c = await navigator.credentials.get({ publicKey: o }), rsp = c.response;
+    const body = { id: c.id, rawId: _bufToB64u(c.rawId), type: c.type,
+      response: { authenticatorData: _bufToB64u(rsp.authenticatorData), clientDataJSON: _bufToB64u(rsp.clientDataJSON),
+        signature: _bufToB64u(rsp.signature), userHandle: rsp.userHandle ? _bufToB64u(rsp.userHandle) : undefined },
+      clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {} };
+    const v = await fetch('/api/webauthn/auth/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await v.json(); if (!v.ok || !j.verified || !j.token) throw new Error(j.error || 'verify failed');
+    return j.token;
+  }
+  // Enrollment is gated by the bearer token upstream — only an already-signed-in
+  // device can bind a new passkey to the account.
+  async function passkeyEnroll(label) {
+    const r = await api('/api/webauthn/register/options');
+    if (!r.ok) throw new Error('options failed (' + r.status + ')');
+    const o = await r.json(); o.challenge = _b64uToBuf(o.challenge); o.user.id = _b64uToBuf(o.user.id);
+    if (o.excludeCredentials) o.excludeCredentials = o.excludeCredentials.map(c => ({ ...c, id: _b64uToBuf(c.id) }));
+    const c = await navigator.credentials.create({ publicKey: o }), rsp = c.response;
+    const body = { id: c.id, rawId: _bufToB64u(c.rawId), type: c.type, label: label || 'StanChat device',
+      response: { attestationObject: _bufToB64u(rsp.attestationObject), clientDataJSON: _bufToB64u(rsp.clientDataJSON),
+        transports: rsp.getTransports ? rsp.getTransports() : [] },
+      clientExtensionResults: c.getClientExtensionResults ? c.getClientExtensionResults() : {} };
+    const v = await api('/api/webauthn/register/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const j = await v.json(); if (!v.ok || !j.verified) throw new Error(j.error || 'verify failed');
+    return j.count;
+  }
+  async function doPasskeyLogin() {
+    const btn = $('passkey-login'); if (!btn) return;
+    btn.disabled = true;
+    try {
+      const t = await passkeyLogin();
+      token = t; localStorage.setItem(LS.token, t);
+      $('auth-error').classList.add('hidden');
+      boot();
+    } catch (e) {
+      btn.disabled = false;
+      // User-cancelled Face ID isn't an error worth shouting about.
+      if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') {
+        const err = $('auth-error'); err.textContent = 'Face ID sign-in failed — use the token.'; err.classList.remove('hidden');
+      }
+    }
   }
 
   // ── WebSocket ─────────────────────────────────────────
@@ -191,9 +256,11 @@
     } else if (m.type === 'snapshot') {
       clearThread();
       stick = true;                       // a fresh thread always opens at the bottom
+      transcript = Array.isArray(m.transcript) ? m.transcript.slice() : [];
       m.transcript.forEach(renderItem);
       scheduleFlush();
     } else if (m.type === 'item') {
+      trackItem(m.item);
       renderItem(m.item);
       scheduleFlush();
     } else if (m.type === 'tokens') {
@@ -222,7 +289,15 @@
       `<div class="empty-hint">or type <code>/auto</code> in the box to launch one instantly</div>` +
       `<div class="empty-chips" id="empty-chips"></div>` +
     `</div>`;
-  function clearThread() { items.clear(); toolCards.clear(); $('thread').innerHTML = ''; hideTyping(); showEmpty(); }
+  function clearThread() { items.clear(); toolCards.clear(); transcript = []; $('thread').innerHTML = ''; hideTyping(); showEmpty(); }
+
+  // Upsert by iid so streaming assistant items (re-broadcast as they grow) replace
+  // their earlier copy rather than piling up duplicates in the export buffer.
+  function trackItem(it) {
+    if (!it || it.iid == null) { transcript.push(it); return; }
+    const i = transcript.findIndex(x => x && x.iid === it.iid);
+    if (i >= 0) transcript[i] = it; else transcript.push(it);
+  }
 
   function hideEmpty() { const e = $('empty-state'); if (e) e.remove(); }
 
@@ -305,6 +380,7 @@
   function renderTool(el, it) {
     el.className = 'turn tool';
     const st = toolStyle(it.name);
+    const bashCmd = it.name === 'Bash' && it.input && it.input.command ? String(it.input.command) : '';
     el.innerHTML =
       `<div class="turn-avatar"></div>` +
       `<div class="turn-body">` +
@@ -321,6 +397,7 @@
         `</div>` +
         `<div class="tool-body">` +
           (Object.keys(it.input || {}).length ? `<div class="tool-input">${esc(prettyInput(it))}</div>` : '') +
+          (bashCmd ? `<div class="tool-actions"><button class="term-send" data-term="${esc(bashCmd)}" title="Send to the cockpit terminal">▶ Terminal</button></div>` : '') +
           `<pre class="tool-out" style="display:none"></pre>` +
         `</div>` +
       `</div></div>`;
@@ -328,6 +405,7 @@
     card._t0 = Date.now();
     toolCards.set(it.toolId, card);
     card.querySelector('.tool-head').addEventListener('click', () => card.classList.toggle('open'));
+    wireTermSend(card);
   }
 
   function prettyInput(it) {
@@ -349,7 +427,7 @@
     if (dt >= 120 && dt < 6e5) card.querySelector('.tool-dur').textContent = (dt / 1000).toFixed(1) + 's';
     const out = card.querySelector('.tool-out');
     if (it.text && it.text.trim()) {
-      out.textContent = it.text;
+      fillToolOut(out, it.text);
       out.style.display = '';
     }
   }
@@ -521,17 +599,58 @@
     try {
       const { key } = await api('/api/push/vapid').then(r => r.json());
       const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: _b64ToU8(key) });
-      await api('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub }) });
+      await api('/api/push/subscribe', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ subscription: sub, prefs: notifPrefs() }) });
       haptic(14); api('/api/push/test', { method: 'POST' }).catch(() => {});
     } catch {}
     renderPushRow();
   }
+  // Notification categories the user can mute independently. Mirrors the server's
+  // push.CATEGORIES; the server skips a device for any category it has turned off.
+  const NOTIF_CATS = [
+    { k: 'reply',  label: 'Replies',      d: 'When Stan finishes a turn and you’re away' },
+    { k: 'work',   label: 'Long tasks',   d: 'A turn that’s run quiet for minutes' },
+    { k: 'error',  label: 'Errors',       d: 'Crashes & stalls you can resume' },
+    { k: 'agent',  label: 'Other agents', d: 'Terminal agents (Codex, Clive…) finishing' },
+    { k: 'system', label: 'System',       d: 'Pi reboots, phone & battery' },
+  ];
+  const LS_NOTIF = 'stanchat_notif_prefs';
+  function notifPrefs() {
+    let p = {}; try { p = JSON.parse(localStorage.getItem(LS_NOTIF) || '{}'); } catch {}
+    const out = {};
+    for (const c of NOTIF_CATS) out[c.k] = p[c.k] !== false;   // default on
+    return out;
+  }
+  async function pushEndpoint() {
+    try { const reg = await navigator.serviceWorker.ready; const s = await reg.pushManager.getSubscription(); return s ? s.endpoint : null; } catch { return null; }
+  }
+  async function setNotifPref(k, on) {
+    const p = notifPrefs(); p[k] = on;
+    localStorage.setItem(LS_NOTIF, JSON.stringify(p));
+    const endpoint = await pushEndpoint();
+    if (endpoint) api('/api/push/prefs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint, prefs: p }) }).catch(() => {});
+  }
+
   async function renderPushRow() {
     const btn = $('s-push'); if (!btn) return;
-    if (!pushSupported()) { btn.textContent = 'Unsupported'; btn.disabled = true; btn.classList.remove('sel'); return; }
+    if (!pushSupported()) { btn.textContent = 'Unsupported'; btn.disabled = true; btn.classList.remove('sel'); renderNotifCats(false); return; }
     const on = await pushIsOn();
     btn.textContent = on ? 'On' : 'Off';
     btn.classList.toggle('sel', on);
+    renderNotifCats(on);
+  }
+  // The per-category toggle grid, shown only while push is enabled.
+  function renderNotifCats(on) {
+    const wrap = $('notif-cats'); if (!wrap) return;
+    if (!on) { wrap.innerHTML = ''; return; }
+    const p = notifPrefs();
+    wrap.innerHTML =
+      `<div class="drawer-section-label">Notify me about</div>` +
+      NOTIF_CATS.map(c => `<button class="opt wide notif-cat${p[c.k] ? ' sel' : ''}" data-cat="${c.k}"><span class="notif-cat-l">${esc(c.label)}</span><span class="notif-cat-d">${esc(c.d)}</span></button>`).join('');
+    wrap.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => {
+      const nowOn = !b.classList.contains('sel');
+      b.classList.toggle('sel', nowOn);
+      setNotifPref(b.dataset.cat, nowOn); haptic(8);
+    }));
   }
   // Jump to a specific chat (push deep-link / SW focus message).
   function openChatId(id) {
@@ -604,6 +723,10 @@
     { c: 'usage',    d: 'Claude plan usage',               run: () => openDrawer('usage') },
     { c: 'sessions', d: 'All chats',                       run: () => openDrawer('sessions') },
     { c: 'settings', d: 'Settings',                        run: () => openDrawer('settings') },
+    { c: 'rename',   a: '[name]',     d: 'Rename this chat',            run: a => slashRename(a) },
+    { c: 'terminal', d: 'Open this chat in the cockpit terminal', run: () => openInTerminal() },
+    { c: 'export',   d: 'Share / copy the transcript',     run: () => slashExport() },
+    { c: 'copy',     d: 'Copy Stan’s last reply',          run: () => slashCopy() },
     { c: 'pet',      d: 'Toggle the Stan mascot',          run: () => togglePet() },
     { c: 'btw',      a: '<question>', d: 'Quick aside to Stan', run: a => sendBtw(a) },
     { c: 'stop',     d: 'Stop the current turn',           run: () => stopGen() },
@@ -635,6 +758,77 @@
   function sendBtw(q) {
     if (!q) { const ta = $('prompt'); ta.value = '/btw '; ta.focus(); autoGrow(ta); return; }
     deliverText('By the way — ' + q);
+  }
+
+  // ── /rename · /export · /copy — chat management ───────────────────────────
+  function slashRename(name) {
+    if (!sessionId) { sysPill('Start the chat first, then rename it.'); return; }
+    if (!name) {   // no arg → prefill the box with the current name for editing
+      const ta = $('prompt'); ta.value = '/rename ' + (meta && meta.name ? meta.name : '');
+      ta.focus(); autoGrow(ta); updateSendDim(); return;
+    }
+    name = name.slice(0, 64);
+    if (meta) meta.name = name;                 // optimistic — server echoes back via meta
+    const nameEl = $('chat-name'); if (nameEl) nameEl.textContent = name;
+    api('/api/chat/' + sessionId, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) })
+      .then(() => sysPill('Renamed to “' + name + '”'))
+      .catch(() => sysPill('Rename failed', 'warn'));
+    haptic(10);
+  }
+
+  async function copyToClipboard(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {}
+    try {   // fallback for older WebViews / non-secure edge cases
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      const ok = document.execCommand('copy'); ta.remove(); return ok;
+    } catch { return false; }
+  }
+
+  // Render the current thread as clean Markdown — user turns, Stan's prose and a
+  // compact one-line trace of each tool call (the work, not its raw output).
+  function buildTranscriptMd() {
+    const head = `# Stan Chat — ${(meta && meta.name) || 'Chat'}\n\n` +
+      `\`${(meta && meta.cwd) || '~'}\` · exported ${new Date().toLocaleString()}\n`;
+    const out = [head];
+    for (const it of transcript) {
+      if (!it) continue;
+      if (it.t === 'user' && it.text && it.text !== '(attachment)') {
+        const atts = (it.attachments || []).map(a => a.name).join(', ');
+        out.push(`\n**You:** ${it.text}${atts ? `  _(📎 ${atts})_` : ''}`);
+      } else if (it.t === 'assistant' && it.text && it.text.trim()) {
+        out.push(`\n**Stan:**\n\n${it.text.trim()}`);
+      } else if (it.t === 'tool_use') {
+        out.push(`\n> \`${it.name}\`${it.summary ? ' — ' + it.summary : ''}`);
+      }
+    }
+    return out.join('\n') + '\n';
+  }
+
+  async function slashExport() {
+    if (!transcript.length) { sysPill('Nothing to export yet.'); return; }
+    const md = buildTranscriptMd();
+    const title = 'Stan Chat — ' + ((meta && meta.name) || 'Chat');
+    if (navigator.share) {   // native share sheet on iOS/Android — the best mobile path
+      try { await navigator.share({ title, text: md }); haptic(10); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }   // user cancelled — don't fall through to copy
+    }
+    const ok = await copyToClipboard(md);
+    sysPill(ok ? 'Transcript copied to clipboard ✓' : 'Could not copy transcript', ok ? '' : 'warn');
+    haptic(ok ? 10 : 6);
+  }
+
+  async function slashCopy() {
+    let last = '';
+    for (let i = transcript.length - 1; i >= 0; i--) {
+      const it = transcript[i];
+      if (it && it.t === 'assistant' && it.text && it.text.trim()) { last = it.text.trim(); break; }
+    }
+    if (!last) { sysPill('No reply to copy yet.'); return; }
+    const ok = await copyToClipboard(last);
+    sysPill(ok ? 'Last reply copied ✓' : 'Could not copy', ok ? '' : 'warn');
+    haptic(ok ? 10 : 6);
   }
   // Send arbitrary text over the live socket as if typed (slash helpers / pet).
   function deliverText(text) {
@@ -724,7 +918,7 @@
       const pr = el.querySelector('.prose');
       if (!pr) continue;
       pr.innerHTML = mdToHtml(it.text) + (it.streaming ? '<span class="streaming-caret"></span>' : '');
-      if (!it.streaming) wireCopies(el);
+      if (!it.streaming) { wireCopies(el); maybeChoices(el, it); }
     }
     pendingStream.clear();
     const t = $('thread'); if (!t) return;
@@ -758,12 +952,18 @@
       .replace(/`([^`]+)`/g, '<code class="inline">$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
-      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
   }
+  // Code fence languages we treat as shell — these get a "Send to terminal" button.
+  const isShellLang = l => /^(sh|bash|shell|zsh|console|terminal|shell-session|shellsession|bashsession)$/i.test(String(l || '').trim());
   function renderCode(c) {
     if (!c) return '';
     const lang = `<span class="code-lang">${esc(c.lang || 'code')}</span>`;
+    const termBtn = isShellLang(c.lang)
+      ? `<button class="term-send" data-term="${esc(c.body)}" title="Send to the cockpit terminal">▶ Terminal</button>`
+      : '';
     return `<div class="codeblock"><div class="code-bar">${lang}` +
+      termBtn +
       `<button class="copy" data-code="${esc(c.body)}">Copy</button></div>` +
       `<pre><code>${esc(c.body)}</code></pre></div>`;
   }
@@ -815,11 +1015,130 @@
     closePara(); closeList();
     return out.join('');
   }
+  // ── Tap-to-pick choices ───────────────────────────────────────────────────
+  // When Stan ends a turn with a short numbered menu and is asking the user to
+  // choose, surface the options as tap chips so picking is one thumb-tap instead
+  // of typing the digit. Deliberately conservative: only a trailing 2–8 item
+  // 1..N ordered list, in a message that actually reads like a question.
+  const stripMd = s => String(s || '').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`#>]/g, '').trim();
+  function extractChoices(text) {
+    const lines = String(text || '').split('\n');
+    const opts = []; let lastIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/^\s*(\d+)[.)]\s+(\S.*)$/);
+      if (m) { opts.push({ n: m[1], label: stripMd(m[2]) }); lastIdx = i; }
+    }
+    if (opts.length < 2 || opts.length > 8) return null;
+    for (let i = 0; i < opts.length; i++) if (+opts[i].n !== i + 1) return null;   // strictly 1..N, in order
+    if (opts.some(o => !o.label || o.label.length > 140)) return null;
+    if (lines.slice(lastIdx + 1).join(' ').trim().length > 80) return null;         // menu must be the tail
+    const asks = /\?|\bwhich\b|\bchoose\b|\boptions?\b|\bpick\b|\bprefer\b|would you like|want me to|shall i|\bselect\b|go with|how.*proceed|let me know/i;
+    if (!asks.test(text)) return null;
+    return opts;
+  }
+  function clearChoiceRows() { document.querySelectorAll('.choice-row').forEach(r => r.remove()); }
+  // Only the latest turn gets chips — stale menus from earlier in the thread stay
+  // plain text, and clearChoiceRows() sweeps them the moment the user sends.
+  function maybeChoices(el, it) {
+    const thread = $('thread');
+    if (!thread || el.parentNode !== thread || thread.lastElementChild !== el) return;
+    if (el.querySelector('.choice-row')) return;
+    const opts = extractChoices(it.text);
+    if (!opts) return;
+    const body = el.querySelector('.turn-body'); if (!body) return;
+    const row = document.createElement('div');
+    row.className = 'choice-row';
+    row.innerHTML = opts.map(o =>
+      `<button class="choice-chip" type="button" data-pick="${esc(o.n)}">` +
+        `<span class="choice-n">${esc(o.n)}</span>` +
+        `<span class="choice-label">${esc(o.label)}</span>` +
+      `</button>`).join('');
+    body.appendChild(row);
+    row.querySelectorAll('.choice-chip').forEach(b =>
+      b.addEventListener('click', () => pickChoice(b.dataset.pick)));
+  }
+  function pickChoice(n) {
+    haptic(12);
+    clearChoiceRows();
+    const ta = $('prompt');
+    if (ta) ta.value = n;
+    send();
+  }
   function wireCopies(scope) {
     scope.querySelectorAll('.copy').forEach(b => b.addEventListener('click', () => {
       navigator.clipboard?.writeText(b.dataset.code);
       b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1200);
     }));
+    wireTermSend(scope);
+  }
+  // ── Chat ⇄ terminal bridge (Part 2) ───────────────────────────────────────
+  function wireTermSend(scope) {
+    scope.querySelectorAll('.term-send').forEach(b => b.addEventListener('click', e => {
+      e.stopPropagation();
+      sendToTerminal(b.dataset.term, b);
+    }));
+  }
+  function flashBtn(b, txt) {
+    if (!b) return;
+    const orig = b.dataset._orig || b.textContent;
+    b.dataset._orig = orig;
+    b.textContent = txt;
+    setTimeout(() => { b.textContent = b.dataset._orig || orig; }, 1500);
+  }
+  // Paste a proposed command into the live shell (execute:false — the user runs it
+  // there, matching "AI suggestions are never auto-run"). With no sessionId the
+  // server targets the most-recent real PTY (chat mirrors are excluded).
+  async function sendToTerminal(text, btn) {
+    if (!text) return;
+    haptic(10);
+    try {
+      const r = await api('/api/term/inject', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, execute: false }),
+      });
+      if (r.status === 404) { sysPill('Open a terminal session first, then send.'); flashBtn(btn, '✕'); return; }
+      if (!r.ok) throw new Error('inject');
+      flashBtn(btn, '✓ Sent');
+      sysPill('Sent to terminal — review, then run it there.');
+    } catch { flashBtn(btn, '✕'); sysPill('Could not reach the terminal', 'warn'); }
+  }
+  // Jump to the cockpit Terminal tab attached to this chat's mirror session.
+  // Cockpit-only (needs the host App + a Terminal tab); degrades to a hint.
+  function openInTerminal() {
+    if (!sessionId) { sysPill('Start the chat first.'); return; }
+    if (!_standalone && window.App && typeof window.App.openTerminalForSession === 'function') {
+      window.App.openTerminalForSession('chat:' + sessionId);
+      haptic(12);
+    } else {
+      sysPill('Open the Stan CLI cockpit → Terminal to watch this chat live.');
+    }
+  }
+  // Tap a file path in tool output → copy it (universal, no new endpoint).
+  function onPathTap(p) {
+    haptic(8);
+    copyToClipboard(p).then(ok => sysPill(ok ? 'Copied ' + p : p, ok ? '' : 'warn'));
+  }
+  // Render plain text into a <pre>, turning absolute-ish paths into tappable spans.
+  // Built with DOM nodes (no innerHTML) so tool output can never inject markup.
+  const PATH_RE = /((?:\/[A-Za-z0-9._-]+){2,})/g;
+  function fillToolOut(preEl, text) {
+    if (text.length > 4000) { preEl.textContent = text; return; }   // skip huge dumps
+    preEl.textContent = '';
+    let last = 0, m, n = 0;
+    PATH_RE.lastIndex = 0;
+    while ((m = PATH_RE.exec(text)) !== null && n < 60) {
+      const p = m[0];
+      if (m.index > last) preEl.appendChild(document.createTextNode(text.slice(last, m.index)));
+      const span = document.createElement('span');
+      span.className = 'tool-path';
+      span.textContent = p;
+      span.title = 'Tap to copy path';
+      span.addEventListener('click', e => { e.stopPropagation(); onPathTap(p); });
+      preEl.appendChild(span);
+      last = m.index + p.length;
+      n++;
+    }
+    if (last < text.length) preEl.appendChild(document.createTextNode(text.slice(last)));
   }
 
   // ── Quick auto session ────────────────────────────────
@@ -929,6 +1248,7 @@
     const text = ta.value.trim();
     if (!text && !pending.length) return;
     stoppedByUs = false; haptic(9);
+    clearChoiceRows();   // any pending tap-menu is now answered
 
     // /auto launches a fresh autopilot session — but only when sending plain
     // text; with attachments staged we just deliver them to the current chat.
@@ -1088,9 +1408,14 @@
       <div class="drawer-section-label">Notifications</div>
       <div class="opt-grid"><button class="opt" id="s-push">Off</button></div>
       <div class="mode-note">Push when a turn finishes while StanChat is closed or your phone's locked — rein in an autopilot from anywhere.</div>
+      <div id="notif-cats" class="notif-cats"></div>
       <div class="drawer-section-label">Default mode · new chats</div><div class="opt-grid">${modeOpts}</div>
       <div class="mode-note" id="s-note">${esc((MODES.find(m => m.v === cfg.mode) || {}).note || '')}</div>
       <div class="drawer-section-label">Default model · new chats</div><div class="opt-grid">${modelOpts}</div>
+      <div class="drawer-section-label">Face ID sign-in</div>
+      <div id="passkey-list"></div>
+      <button class="opt wide" id="s-passkey-add">Add Face ID to this device</button>
+      <div class="mode-note" id="s-passkey-note">Sign in with Face ID / Touch ID instead of the token. Syncs across your Apple devices via iCloud Keychain.</div>
       <div class="drawer-section-label">Maintenance</div>
       <button class="opt wide danger" id="s-clear">Clear all disconnected chats</button>
       <button class="drawer-cta" id="s-back">← Back to chats</button>`;
@@ -1118,7 +1443,44 @@
     });
     renderPushRow();
     const sp = $('s-push'); if (sp) sp.addEventListener('click', () => togglePush());
+    renderPasskeyRow();
     $('s-back').addEventListener('click', () => renderSessions());
+  }
+
+  // Face ID enrollment + management, inside Settings. Enroll endpoints are
+  // token-gated, so this only works once signed in (which, in Settings, we are).
+  async function renderPasskeyRow() {
+    const add = $('s-passkey-add'), note = $('s-passkey-note'), list = $('passkey-list');
+    if (!add) return;
+    if (!passkeySupported()) {
+      add.disabled = true; note.textContent = 'This browser doesn’t support passkeys.';
+      return;
+    }
+    const refresh = async () => {
+      let creds = [];
+      try { creds = (await api('/api/webauthn/credentials').then(r => r.json())).credentials || []; } catch {}
+      list.innerHTML = creds.map(c =>
+        `<div class="passkey-item"><span>${esc(c.label || 'Passkey')}</span>` +
+        `<button class="passkey-del" data-id="${esc(c.id)}" aria-label="Remove passkey">Remove</button></div>`).join('');
+      list.querySelectorAll('.passkey-del').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        try { await api('/api/webauthn/credentials/delete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: b.dataset.id }) }); }
+        catch {}
+        refresh();
+      }));
+    };
+    refresh();
+    add.addEventListener('click', async () => {
+      add.disabled = true; add.textContent = 'Waiting for Face ID…';
+      try {
+        await passkeyEnroll('StanChat (' + (navigator.platform || 'device') + ')');
+        note.textContent = '✓ Face ID enabled — you’ll see it on the sign-in screen.';
+      } catch (e) {
+        if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') note.textContent = '⚠ ' + (e.message || 'enroll failed');
+      }
+      add.disabled = false; add.textContent = 'Add Face ID to this device';
+      refresh();
+    });
   }
 
   async function renderNewChat() {
@@ -1320,6 +1682,7 @@
     const tSubmit = $('token-submit'), tInput = $('token-input');   // standalone-only
     if (tSubmit) tSubmit.addEventListener('click', doLogin);
     if (tInput) tInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+    const pkBtn = $('passkey-login'); if (pkBtn) pkBtn.addEventListener('click', doPasskeyLogin);
     $('send-btn').addEventListener('click', () => {
       if ($('send-btn').classList.contains('stop')) stopGen(); else send();
     });

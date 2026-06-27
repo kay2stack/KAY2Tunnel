@@ -27,7 +27,7 @@ const { AUTH_TOKEN } = require('./config');
 const RP_NAME = process.env.WEBAUTHN_RP_NAME || 'MacPiOs';
 const RP_ID   = process.env.WEBAUTHN_RP_ID   || 'spikeradar.co.uk';
 const ORIGINS = (process.env.WEBAUTHN_ORIGINS ||
-  'https://kay2os.spikeradar.co.uk,https://stan.spikeradar.co.uk')
+  'https://kay2os.spikeradar.co.uk,https://stan.spikeradar.co.uk,https://stanchat.spikeradar.co.uk')
   .split(',').map(s => s.trim()).filter(Boolean);
 
 // Single operator ("Kane"); a stable user handle is all WebAuthn needs.

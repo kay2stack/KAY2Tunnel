@@ -32,6 +32,10 @@
       <input id="token-input" type="password" placeholder="Auth token" autocomplete="current-password" spellcheck="false">
     </div>
     <button id="token-submit">Connect</button>
+    <button id="passkey-login" class="auth-passkey-btn hidden" type="button">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg>
+      <span>Sign in with Face ID</span>
+    </button>
     <p id="auth-error" class="auth-error hidden">Invalid token — check and try again</p>
     <p class="auth-hint">Same token as Stan CLI · stored on this device only.</p>
   </div>

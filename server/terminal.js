@@ -109,6 +109,100 @@ class Session {
   }
 }
 
+// A "virtual" session — same client/scrollback/heartbeat machinery as a real
+// PTY Session, but with NO process behind it. Used to mirror a Stan Chat
+// conversation into the terminal: chat.js pushes an ANSI-formatted transcript in
+// via appendOutput(), and keystrokes typed by a terminal client are line-
+// buffered + locally echoed (there's no PTY to echo them) and handed back to the
+// chat via onInput(). The PTY path above is deliberately left untouched.
+class VirtualSession {
+  constructor({ id, name = null, label = null, cwd = ROOT_DIR, onInput = null, onKill = null } = {}) {
+    this.id = id;
+    this.type = 'chat';
+    this.name = name;
+    this.label = label;
+    this.cmd = 'chat';
+    this.cwd = cwd;
+    this.clients = new Set();
+    this.scrollback = Buffer.alloc(0);
+    this.lastActive = Date.now();
+    this.createdAt = Date.now();
+    this._lineBuf = '';
+    this._onInput = typeof onInput === 'function' ? onInput : null;
+    this._onKill = typeof onKill === 'function' ? onKill : null;
+  }
+
+  // The bridge: append text to the ring + broadcast it to attached terminals.
+  // (The body of Session's pty.onData, minus the PTY.)
+  appendOutput(text) {
+    const data = String(text == null ? '' : text);
+    if (!data) return;
+    this._appendScrollback(data);
+    this.lastActive = Date.now();
+    for (const ws of this.clients) {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'output', data }));
+    }
+  }
+
+  // No PTY to echo, so we line-buffer + local-echo printable chars ourselves and
+  // fire onInput(line) on Enter. Handles CR/LF, backspace and Ctrl-C.
+  write(data) {
+    const s = String(data == null ? '' : data);
+    for (const ch of s) {
+      if (ch === '\r' || ch === '\n') {
+        const line = this._lineBuf;
+        this._lineBuf = '';
+        this.appendOutput('\r\n');
+        if (line.trim() && this._onInput) { try { this._onInput(line); } catch { /* chat gone */ } }
+      } else if (ch === '\x7f' || ch === '\b') {
+        if (this._lineBuf.length) { this._lineBuf = this._lineBuf.slice(0, -1); this.appendOutput('\b \b'); }
+      } else if (ch === '\x03') {            // Ctrl-C — abandon the current line
+        this._lineBuf = '';
+        this.appendOutput('^C\r\n');
+      } else if (ch >= ' ') {                // printable (incl. multi-byte)
+        this._lineBuf += ch;
+        this.appendOutput(ch);
+      }
+    }
+    this.lastActive = Date.now();
+  }
+
+  resize() { /* no PTY — nothing to resize */ }
+
+  // A terminal client asked to kill: tell that surface the process exited and
+  // run any hook, but DON'T remove it from the Map — the chat owns its lifecycle.
+  kill() {
+    if (this._onKill) { try { this._onKill(); } catch {} }
+    for (const ws of this.clients) {
+      if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'exit' }));
+    }
+  }
+}
+// Reuse the PTY-free Session methods verbatim — same scrollback/attach/heartbeat.
+for (const m of ['_appendScrollback', 'attach', 'detach', '_heartbeat', 'tail', 'rename']) {
+  VirtualSession.prototype[m] = Session.prototype[m];
+}
+
+// Idempotent insert of a chat-mirror session into the shared sessions Map.
+function registerVirtual({ id, name = null, label = null, cwd = ROOT_DIR, onInput = null, onKill = null } = {}) {
+  if (!id) return null;
+  const existing = sessions.get(id);
+  if (existing) return existing;
+  const s = new VirtualSession({ id, name, label, cwd, onInput, onKill });
+  sessions.set(id, s);
+  return s;
+}
+
+// Remove a chat mirror and tell any watchers the process exited.
+function unregisterVirtual(id) {
+  const s = sessions.get(id);
+  if (!s) return;
+  for (const ws of s.clients) {
+    if (ws.readyState === ws.OPEN) ws.send(JSON.stringify({ type: 'exit' }));
+  }
+  sessions.delete(id);
+}
+
 function handleWs(ws, req) {
   const url = new URL(req.url, 'http://localhost');
   const sessionId = url.searchParams.get('session');
@@ -153,6 +247,7 @@ function listSessions() {
     label: s.label,
     cmd: s.cmd,
     cwd: s.cwd,
+    type: s.type || 'shell',
     clients: s.clients.size,
     lastActive: s.lastActive,
     createdAt: s.createdAt,
@@ -171,9 +266,10 @@ function renameSession(id, label) {
 function killSession(id) {
   const session = getSession(id);
   if (!session) return null;
+  if (session.type === 'chat') return null;   // chat mirrors are owned by chat.js — can't orphan one here
   session.kill();
   sessions.delete(id);
   return session;
 }
 
-module.exports = { handleWs, listSessions, getSession, renameSession, killSession, setExitNotifier };
+module.exports = { handleWs, listSessions, getSession, renameSession, killSession, setExitNotifier, registerVirtual, unregisterVirtual };

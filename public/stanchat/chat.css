@@ -76,6 +76,16 @@ a:active { opacity: .7; }
   transition: transform var(--dur-fast), background var(--dur-fast);
 }
 #token-submit:active { background: var(--accent-press); transform: scale(0.98); }
+.auth-passkey-btn {
+  width: 100%; margin-top: 10px; padding: 13px;
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  font-size: 15px; font-weight: 700; color: var(--text-primary);
+  background: var(--bg-input); border: 1.5px solid var(--border); border-radius: var(--r-md);
+  transition: transform var(--dur-fast), border-color var(--dur-fast);
+}
+.auth-passkey-btn svg { width: 19px; height: 19px; color: var(--accent); }
+.auth-passkey-btn:active { transform: scale(0.98); border-color: var(--accent); }
+.auth-passkey-btn[disabled] { opacity: 0.55; }
 .auth-error { color: var(--red); font-size: 13px; text-align: center; margin: 12px 0 0; }
 .auth-hint { color: var(--text-dim); font-size: 12px; text-align: center; margin: 14px 0 0; line-height: 1.5; }
 
@@ -280,6 +290,24 @@ a:active { opacity: .7; }
   font-family: var(--font-mono); font-size: 12px; line-height: 1.45;
   max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word;
 }
+/* Tappable file paths inside tool output → copy on tap. */
+.tool-out .tool-path {
+  color: var(--accent); text-decoration: underline; text-underline-offset: 2px;
+  cursor: pointer; word-break: break-all;
+}
+.tool-out .tool-path:active { opacity: .6; }
+
+/* ── Chat ⇄ terminal bridge: "Send to terminal" buttons ── */
+.code-bar .code-lang { margin-right: auto; }   /* group the buttons to the right */
+.term-send {
+  font-size: 11px; padding: 3px 10px; border-radius: 6px; border: none;
+  background: rgba(61,214,140,0.16); color: var(--green, #3DD68C); font-weight: 700;
+  white-space: nowrap; transition: background var(--dur-fast);
+}
+.code-bar .term-send { margin-right: 8px; }
+.term-send:active { background: var(--green, #3DD68C); color: #04210f; }
+.tool-actions { padding: 8px 11px; background: var(--bg-secondary); }
+.tool-actions .term-send { width: 100%; padding: 7px; }
 
 /* ════════ Empty state ════════════════════════════════════════════ */
 .empty-state { margin: auto; text-align: center; padding: 30px 24px; max-width: 380px; }
@@ -314,6 +342,25 @@ a:active { opacity: .7; }
   transition: border-color var(--dur-fast), color var(--dur-fast), transform var(--dur-fast);
 }
 .empty-chip:active { border-color: var(--accent); color: var(--accent); transform: scale(0.96); }
+
+/* ════════ Tap-to-pick choices ════════════════════════════════════ */
+.choice-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.choice-chip {
+  display: inline-flex; align-items: center; gap: 8px; max-width: 100%;
+  background: var(--bg-card); border: 1px solid var(--border); color: var(--text-secondary);
+  border-radius: var(--r-pill); padding: 8px 14px 8px 8px; font-size: 13.5px; text-align: left;
+  transition: border-color var(--dur-fast), color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast);
+}
+.choice-chip .choice-n {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: var(--accent-dim); color: var(--accent);
+  font-family: var(--font-display); font-size: 12px; font-weight: 800;
+}
+.choice-chip .choice-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.choice-chip:active {
+  border-color: var(--accent); color: var(--accent); background: var(--accent-dim); transform: scale(0.97);
+}
 
 /* ════════ Jump-to-latest ═════════════════════════════════════════ */
 #jump-btn {
@@ -695,6 +742,39 @@ a:active { opacity: .7; }
 .opt.danger { color: var(--red); border-color: var(--red-bg); }
 .opt.danger:active { background: var(--red-bg); }
 .opt.danger:disabled { opacity: .5; }
+
+/* Passkey (Face ID) list — Settings → Face ID sign-in */
+.passkey-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 11px 14px; margin-bottom: 8px;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--r-md);
+  font-size: 14px; color: var(--text-primary);
+}
+.passkey-del { font-size: 13px; font-weight: 600; color: var(--red); background: none; border: none; padding: 4px 6px; }
+.passkey-del:active { opacity: .6; }
+.passkey-del:disabled { opacity: .4; }
+
+/* Notification category toggles (Settings → Notify me about) */
+.notif-cats { display: flex; flex-direction: column; gap: 8px; }
+.notif-cats .drawer-section-label { margin-top: 16px; }
+.notif-cat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  text-align: left; padding: 11px 44px 11px 14px; position: relative; min-height: 52px; justify-content: center;
+}
+.notif-cat .notif-cat-l { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.notif-cat .notif-cat-d { font-size: 12px; color: var(--text-dim); line-height: 1.4; }
+.notif-cat.sel { border-color: var(--accent); background: var(--accent-dim); }
+.notif-cat.sel .notif-cat-l { color: var(--accent); }
+.notif-cat::after {
+  content: ''; position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+  width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--border);
+  transition: background var(--dur-fast), border-color var(--dur-fast);
+}
+.notif-cat.sel::after {
+  border-color: var(--accent); background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+  background-size: 13px; background-position: center; background-repeat: no-repeat;
+}
 
 /* ════════ Wide screens ═══════════════════════════════════════════ */
 @media (min-width: 760px) {

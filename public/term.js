@@ -354,6 +354,7 @@ const Term = (() => {
     } catch (e) { content.innerHTML = `<p style="color:var(--color-danger)">${e.message}</p>`; }
   }
 
+  let _sessFilter = 'all';
   function renderSessionsList(content, sessions) {
     content.innerHTML = '';
     if (!sessions.length) {
@@ -364,7 +365,31 @@ const Term = (() => {
       return;
     }
 
-    sessions
+    // All / Shells / Chats toggle — only worth showing once a chat mirror exists.
+    if (sessions.some(s => s.type === 'chat')) {
+      const bar = document.createElement('div');
+      bar.className = 'session-filter';
+      bar.style.cssText = 'display:flex;gap:6px;margin-bottom:10px';
+      [['all', 'All'], ['shell', 'Shells'], ['chat', '💬 Chats']].forEach(([v, label]) => {
+        const b = document.createElement('button');
+        b.className = 'top-bar-action' + (_sessFilter === v ? ' primary' : '');
+        b.textContent = label;
+        b.addEventListener('click', () => { _sessFilter = v; renderSessionsList(content, sessions); });
+        bar.appendChild(b);
+      });
+      content.appendChild(bar);
+    }
+
+    const shown = sessions.filter(s =>
+      _sessFilter === 'all' ? true : _sessFilter === 'chat' ? s.type === 'chat' : s.type !== 'chat');
+    if (!shown.length) {
+      const empty = document.createElement('p');
+      empty.className = 'session-empty';
+      empty.textContent = _sessFilter === 'chat' ? 'No chat mirrors' : 'No shell sessions';
+      content.appendChild(empty);
+      return;
+    }
+    shown
       .sort((a, b) => b.lastActive - a.lastActive)
       .forEach(s => content.appendChild(sessionRow(s)));
   }
@@ -414,9 +439,12 @@ const Term = (() => {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'top-bar-action danger';
     removeBtn.textContent = 'Remove';
-    removeBtn.disabled = s.id === sessionId;
-    removeBtn.title = s.id === sessionId ? 'Switch sessions before removing the current shell' : 'Stop this shell and remove it from the list';
-    removeBtn.addEventListener('click', () => removeSession(s));
+    const isChat = s.type === 'chat';
+    removeBtn.disabled = s.id === sessionId || isChat;
+    removeBtn.title = isChat ? 'Manage from Stan Chat'
+      : s.id === sessionId ? 'Switch sessions before removing the current shell'
+      : 'Stop this shell and remove it from the list';
+    if (!isChat) removeBtn.addEventListener('click', () => removeSession(s));
     actions.appendChild(removeBtn);
 
     row.appendChild(actions);
@@ -525,7 +553,12 @@ const Term = (() => {
 
   function focus() { term?.focus(); }
   function paste(text) { if (wsOpen) sendMsg({ type: 'input', data: text }); focus(); }
-  function sessionTitle(s) { return s.label || s.name || s.cmd || 'bash'; }
+  function sessionTitle(s) {
+    const base = s.label || s.name || s.cmd || 'bash';
+    // Chat mirrors (server type 'chat', id 'chat:<uuid>') get a 💬 and lose the prefix.
+    if (s.type === 'chat') return '💬 ' + String(base).replace(/^chat:/, '');
+    return base;
+  }
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
   // ── Clips panel ────────────────────────────────────

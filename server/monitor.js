@@ -21,7 +21,10 @@ let _timers = [];
 function load() { try { return JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')); } catch { return {}; } }
 function save() { try { fs.writeFileSync(STATE_FILE, JSON.stringify(state)); } catch {} }
 
-function fire(o) { push.notify(o).catch(() => {}); }
+// Reboots, phone connect/disconnect, battery & temperature are all infrastructure
+// alerts → the 'system' category, so a device can mute them independently of chat
+// replies.
+function fire(o) { push.notify({ category: 'system', ...o }).catch(() => {}); }
 
 function bootId() {
   try {

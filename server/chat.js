@@ -20,7 +20,12 @@ const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const push = require('./push');
+const term = require('./terminal');   // one-directional: terminal.js never requires chat.js, so no cycle
 const { ROOT_DIR } = require('./config');
+
+// Mirror typed keystrokes back into the chat as a real turn. Read-only mirror
+// ships near-zero-risk; this flag (on by default) enables bidirectional input.
+const MIRROR_INPUT = process.env.MIRROR_INPUT !== '0';
 
 // Attachments from a phone/device land here (central, outside any repo) so a
 // chat session can hand real files + images straight to Claude Code. Images are
@@ -118,12 +123,30 @@ function resultText(content) {
   return '';
 }
 
+// ── Auto fast-mode + model routing ──────────────────────────────────────────
+// Short/simple turns run on a snappy model; substantive turns use the user's
+// default. On an unexpected crash we route to a more-available model so the
+// resume is reliable. Only active while a chat is in "Auto" model mode (the
+// default); picking a fixed model in the UI disables it.
+const FAST_MODEL = 'sonnet';        // quick replies for short talk
+const FULL_MODEL = null;            // null = the user's configured Claude default
+const FALLBACK_MODEL = 'sonnet';    // routed to after an unexpected exit
+function isShortTalk(text, atts) {
+  if (atts && atts.length) return false;
+  const t = String(text || '').trim();
+  if (!t || t.length > 72 || /[\n`]/.test(t) || t[0] === '/') return false;
+  if (t.split(/\s+/).length > 12) return false;
+  if (/\b(build|fix|refactor|implement|debug|write|create|code|deploy|install|run|review|analy[sz]e|error|stack|trace|test|migrate)\b/i.test(t)) return false;
+  return true;
+}
+
 class ChatSession {
   constructor({ name, cwd, model, permMode }) {
     this.id = uuid();
     this.name = (name && String(name).slice(0, 64)) || 'Chat';
     this.cwd = resolveCwd(cwd) || ROOT_DIR;
     this.model = model || null;
+    this.autoModel = !model;   // Auto model mode on unless a fixed model was chosen
     // Safe-by-default: read-only 'plan' unless the user explicitly opts into a
     // writing/autonomous mode per chat in the UI. Autopilot is never the default.
     this.permMode = PERM_MODES.has(permMode) ? permMode : 'plan';
@@ -143,7 +166,91 @@ class ChatSession {
     this._liveTok = 0;            // running output-token estimate for the current turn
     this._tokAt = 0;              // last live-token broadcast (throttle)
     this._restarting = false;     // intentional respawn (model switch) — suppress 'exited'
+    // Companion "virtual" terminal session — the same conversation, watchable and
+    // typeable from the cockpit Terminal tab. Namespaced id avoids any clash with
+    // bare-UUID PTY ids and lets the UI detect mirrors by prefix.
+    this.mirrorId = 'chat:' + this.id;
+    this._mirroredIids = new Set();
+    this._registerMirror();
     this._spawn(false);
+  }
+
+  // ── Terminal mirror ───────────────────────────────────────────────────────
+  _registerMirror() {
+    try {
+      const m = term.registerVirtual({
+        id: this.mirrorId,
+        name: 'chat:' + this.name,
+        cwd: this.cwd,
+        onInput: MIRROR_INPUT ? (line => this.send(line, [])) : null,
+        onKill: () => {},
+      });
+      if (m) m.appendOutput(
+        '\x1b[2m── Live mirror of Stan Chat · ' + this.name + ' ──\x1b[0m\r\n' +
+        (MIRROR_INPUT
+          ? '\x1b[2mType a message + Enter to send it into this chat.\x1b[0m\r\n\r\n'
+          : '\x1b[2mRead-only transcript.\x1b[0m\r\n\r\n')
+      );
+    } catch { /* terminal module unavailable — mirror is best-effort */ }
+  }
+
+  // Render one transcript item as ANSI for the terminal mirror. Colours track the
+  // xterm theme in public/term.js. Returns '' for nothing-to-show.
+  _renderItem(item) {
+    if (!item || !item.t) return '';
+    const NL = s => String(s == null ? '' : s).replace(/\r?\n/g, '\r\n');
+    switch (item.t) {
+      case 'user': {
+        const atts = (item.attachments || []).map(a => a.name).join(', ');
+        const body = item.text && item.text !== '(attachment)' ? item.text : (atts ? '(attachment)' : '');
+        const tail = atts ? '  \x1b[2m📎 ' + atts + '\x1b[0m' : '';
+        return '\x1b[1;35m› \x1b[0m\x1b[1m' + NL(body) + '\x1b[0m' + tail + '\r\n\r\n';
+      }
+      case 'assistant': {
+        const t = (item.text || '').trim();
+        return t ? NL(t) + '\r\n\r\n' : '';
+      }
+      case 'tool_use': {
+        const sum = item.summary ? ' \x1b[2m· ' + item.summary + '\x1b[0m' : '';
+        return '\x1b[36m⚙ ' + (item.name || 'tool') + '\x1b[0m' + sum + '\r\n';
+      }
+      case 'tool_result': {
+        let txt = (item.text || '').trim();
+        if (!txt) return '';
+        // Hard-truncate (~6 lines / ~400 chars) so a noisy tool can't eat the 256KB
+        // terminal ring — the chat itself keeps the fuller 6000-char copy.
+        txt = txt.split('\n').slice(0, 6).join('\n');
+        if (txt.length > 400) txt = txt.slice(0, 400) + '…';
+        const color = item.isError ? '\x1b[31m' : '\x1b[2m';
+        return color + NL(txt) + '\x1b[0m\r\n';
+      }
+      case 'thinking': {
+        const t = (item.text || '').trim();
+        if (!t) return '';
+        return '\x1b[2;3m' + t.split('\n')[0].slice(0, 200) + '\x1b[0m\r\n';
+      }
+      case 'system': {
+        const color = item.level === 'error' ? '\x1b[31m' : item.level === 'warn' ? '\x1b[33m' : '\x1b[2m';
+        return color + NL(item.text || '') + '\x1b[0m\r\n';
+      }
+      default: return '';
+    }
+  }
+
+  // Append an item to the mirror, deduped by iid (a streamed assistant item is
+  // finalized at two points — only mirror it once).
+  _mirrorRender(item) {
+    if (!item) return;
+    if (item.iid != null) {
+      if (this._mirroredIids.has(item.iid)) return;
+      this._mirroredIids.add(item.iid);
+    }
+    const out = this._renderItem(item);
+    if (!out) return;
+    try {
+      const m = term.getSession(this.mirrorId);
+      if (m && typeof m.appendOutput === 'function') m.appendOutput(out);
+    } catch {}
   }
 
   meta() {
@@ -183,6 +290,7 @@ class ChatSession {
         body: (this._lastText() || 'Turn complete — tap to open').slice(0, 180),
         tag: 'chat-' + this.id,
         url: '/stanchat/?c=' + this.id,
+        category: 'reply',
       });
     } catch {}
   }
@@ -237,8 +345,10 @@ class ChatSession {
       this._broadcast({ type: 'status', status: this.status, lastResult: this.lastResult, exitCode: code });
       // Crashed mid-turn (Claude/Pi hiccup) → alert; it's resumable on the next send.
       if (wasBusy && code) {
-        this._push({ t: 'system', level: 'error', text: 'Claude stopped unexpectedly (exit ' + code + '). Resend to resume — full context is kept.' });
-        try { push.notify({ title: 'Stan · ' + this.name, body: 'Claude stopped mid-task — resend to resume.', tag: 'crash-' + this.id, url: '/stanchat/?c=' + this.id }); } catch {}
+        let _extra = '';
+        if (this.autoModel && this.model !== FALLBACK_MODEL) { this.model = FALLBACK_MODEL; _extra = ' Routed to a more available model (' + FALLBACK_MODEL + ').'; }
+        this._push({ t: 'system', level: 'error', text: 'Claude stopped unexpectedly (exit ' + code + '). Resend to resume — full context is kept.' + _extra });
+        try { push.notify({ title: 'Stan · ' + this.name, body: 'Claude stopped mid-task — resend to resume.', tag: 'crash-' + this.id, url: '/stanchat/?c=' + this.id, category: 'error' }); } catch {}
       }
     });
     this.proc.on('error', (e) => {
@@ -266,8 +376,10 @@ class ChatSession {
   // the idle proc and let the next send() resume the SAME session (--resume keeps
   // full context) with the new --model. Guarded so the respawn doesn't surface as
   // a scary "session ended".
-  setModel(model) {
+  setModel(model, isAuto) {
+    if (model === 'auto') model = null;
     model = model ? String(model).slice(0, 80) : null;
+    if (!isAuto) this.autoModel = (model == null);   // user choice toggles Auto mode
     if (model === this.model) return;
     this.model = model;
     if (this.proc && !this.busy) {
@@ -278,6 +390,21 @@ class ChatSession {
     }
     this.lastActive = now();
     this._broadcast({ type: 'meta', meta: this.meta() });
+  }
+
+  // Rename the chat (affects the topbar, sessions list and fleet card). Pure
+  // metadata — never touches the live process or its context.
+  setName(name) {
+    name = String(name || '').trim().slice(0, 64);
+    if (!name || name === this.name) return false;
+    this.name = name;
+    this.lastActive = now();
+    try {
+      const m = term.getSession(this.mirrorId);
+      if (m) { m.name = 'chat:' + name; if (typeof m.rename === 'function') m.rename(name); }
+    } catch {}
+    this._broadcast({ type: 'meta', meta: this.meta() });
+    return true;
   }
 
   _onStdout(buf) {
@@ -352,7 +479,7 @@ class ChatSession {
         this._update(this._stream);
       }
     } else if (event.type === 'content_block_stop') {
-      if (this._stream) { this._stream.streaming = false; this._update(this._stream); this._stream = null; }
+      if (this._stream) { this._stream.streaming = false; this._update(this._stream); this._mirrorRender(this._stream); this._stream = null; }
     }
   }
 
@@ -366,6 +493,7 @@ class ChatSession {
           this._stream.text = block.text || this._stream.text;
           this._stream.streaming = false;
           this._update(this._stream);
+          this._mirrorRender(this._stream);
           this._stream = null;
         } else if ((block.text || '').trim()) {
           this._push({ t: 'assistant', text: block.text, streaming: false });
@@ -405,6 +533,9 @@ class ChatSession {
     if (this.transcript.length > MAX_TRANSCRIPT) this.transcript.shift();
     this.lastActive = now();
     this._broadcast({ type: 'item', item });
+    // Mirror to the terminal — but NOT the streaming assistant stub (per-token
+    // growth would flood the ring). Streamed prose is mirrored once on finalize.
+    if (!(item.t === 'assistant' && item.streaming)) this._mirrorRender(item);
     return item;
   }
   _update(item) {
@@ -424,6 +555,11 @@ class ChatSession {
     text = String(text || '').trim();
     const atts = Array.isArray(attachments) ? attachments : [];
     if (!text && !atts.length) return;
+    // Auto fast-mode: snappy model for short/simple turns, default for substantive ones.
+    if (this.autoModel) {
+      const want = isShortTalk(text, atts) ? FAST_MODEL : FULL_MODEL;
+      if (want !== this.model) this.setModel(want, true);
+    }
     this._ensureProc();
     if (!this.proc) return;
 
@@ -488,6 +624,7 @@ class ChatSession {
   }
   destroy() {
     this.kill();
+    try { term.unregisterVirtual(this.mirrorId); } catch {}
     try { fs.rmSync(path.join(UPLOAD_ROOT, this.id), { recursive: true, force: true }); } catch {}
     sessions.delete(this.id);
   }
@@ -526,7 +663,7 @@ setInterval(() => {
       s._alertedSilence = true;
       const mins = Math.round((t - s.lastActive) / 60000);
       s._push({ t: 'system', level: 'warn', text: `Still working — no update for ${mins}m. Tap Stop if it looks wedged.` });
-      try { push.notify({ title: 'Stan · ' + s.name, body: `Working ${mins}m with no update — tap to check.`, tag: 'silence-' + s.id, url: '/stanchat/?c=' + s.id }); } catch {}
+      try { push.notify({ title: 'Stan · ' + s.name, body: `Working ${mins}m with no update — tap to check.`, tag: 'silence-' + s.id, url: '/stanchat/?c=' + s.id, category: 'work' }); } catch {}
     }
   }
 }, 60 * 1000).unref?.();
@@ -568,6 +705,15 @@ router.post('/', express.json(), (req, res) => {
   if (cwd === null) return res.status(400).json({ error: 'Path outside home directory' });
   const s = create({ name: req.body?.name, cwd: req.body?.cwd, model: req.body?.model, permMode: req.body?.mode });
   res.json({ id: s.id, meta: s.meta() });
+});
+router.patch('/:id', express.json(), (req, res) => {
+  const s = sessions.get(req.params.id);
+  if (!s) return res.status(404).json({ error: 'Not found' });
+  const name = String(req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (name.length > 64) return res.status(400).json({ error: 'Name is too long' });
+  s.setName(name);
+  res.json({ ok: true, id: s.id, name: s.name });
 });
 router.delete('/:id', (req, res) => {
   const s = sessions.get(req.params.id);
