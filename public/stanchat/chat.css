@@ -318,7 +318,18 @@ a:active { opacity: .7; }
   box-shadow: 0 14px 38px var(--halo);
   animation: orbBob 4.5s ease-in-out infinite;
 }
+/* When the real Stan mascot loads, shed the gradient tile and let him float free.
+   If the image 404s, onerror removes it → :has() stops matching → tile returns. */
+.empty-orb:has(.empty-stan) {
+  width: auto; height: auto; border-radius: 0;
+  background: none; box-shadow: none; color: transparent;
+}
+.empty-stan {
+  width: 116px; height: 116px; object-fit: contain; user-select: none;
+  filter: drop-shadow(0 16px 26px var(--halo));
+}
 @keyframes orbBob { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-7px)} }
+@media (prefers-reduced-motion: reduce) { .empty-orb { animation: none; } }
 .empty-title { font-family: var(--font-display); font-size: 21px; font-weight: 800; letter-spacing: -0.02em; }
 .empty-sub { color: var(--text-dim); font-size: 14.5px; margin-top: 9px; line-height: 1.55; }
 .empty-actions { margin-top: 22px; display: flex; justify-content: center; }

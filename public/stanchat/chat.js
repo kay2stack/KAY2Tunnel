@@ -282,7 +282,7 @@
   // void instead of the "Talk to StanAI" orb.
   const EMPTY_HTML =
     `<div id="empty-state" class="empty-state">` +
-      `<div class="empty-orb">◉</div>` +
+      `<div class="empty-orb"><img class="empty-stan" src="/stanchat/img/stan-hero.png" alt="Stan" draggable="false" onerror="this.remove()">◉</div>` +
       `<div class="empty-title">Talk to StanAI</div>` +
       `<div class="empty-sub">Claude Code, live on the kay2 Pi — full repo access and every tool. Ask it to build, fix, explain or explore, and watch the work happen.</div>` +
       `<div class="empty-actions"><button class="empty-auto" id="empty-auto">⚡ Quick auto session</button></div>` +
@@ -1783,7 +1783,7 @@
     </header>
     <div id="thread">
       <div id="empty-state" class="empty-state">
-        <div class="empty-orb">◉</div>
+        <div class="empty-orb"><img class="empty-stan" src="/stanchat/img/stan-hero.png" alt="Stan" draggable="false" onerror="this.remove()">◉</div>
         <div class="empty-title">Talk to StanAI</div>
         <div class="empty-sub">Claude Code, live on the kay2 Pi — full repo access and every tool. Ask it to build, fix, explain or explore, and watch the work happen.</div>
         <div class="empty-actions"><button class="empty-auto" id="empty-auto">⚡ Quick auto session</button></div>
