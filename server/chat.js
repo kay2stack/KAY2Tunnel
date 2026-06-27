@@ -73,6 +73,8 @@ const CLAUDE_BIN = (() => {
 
 const MAX_TRANSCRIPT = 500;                  // normalized items kept per chat
 const IDLE_TTL_MS = 1000 * 60 * 60 * 8;      // reap idle, process-less chats after 8h
+const IDLE_PROC_MS = 1000 * 60 * 20;         // hibernate a live-but-idle chat's claude proc after 20m
+const MAX_LIVE_PROCS = 4;                     // hard cap on concurrent claude procs (4-core Pi, ~150-350MB each)
 const PERM_MODES = new Set(['plan', 'acceptEdits', 'bypassPermissions', 'default']);
 
 const sessions = new Map();   // id -> ChatSession
@@ -341,6 +343,7 @@ class ChatSession {
       this.busy = false;
       this._stream = null;
       if (this._restarting) { this._restarting = false; this.status = 'idle'; return; }  // model switch — not a real exit
+      if (this._hibernating) { this._hibernating = false; this.status = 'idle'; return; } // idle memory reap — resumes on next send, full context kept
       this.status = 'exited';
       this._broadcast({ type: 'status', status: this.status, lastResult: this.lastResult, exitCode: code });
       // Crashed mid-turn (Claude/Pi hiccup) → alert; it's resumable on the next send.
@@ -622,6 +625,18 @@ class ChatSession {
     this.proc = null;
     this.status = 'exited';
   }
+  // Free an idle chat's claude process to reclaim memory, KEEPING the session +
+  // transcript. The next send() calls _ensureProc() → _spawn(resume) so the chat
+  // resumes with full context (--resume). Never touch a busy or watched chat.
+  hibernate() {
+    if (!this.proc || this.busy) return false;
+    this._hibernating = true;
+    try { this.proc.stdin.end(); } catch {}
+    try { this.proc.kill('SIGTERM'); } catch {}
+    this.proc = null;
+    this.status = 'idle';
+    return true;
+  }
   destroy() {
     this.kill();
     try { term.unregisterVirtual(this.mirrorId); } catch {}
@@ -650,6 +665,34 @@ setInterval(() => {
     if (!s.proc && s.clients.size === 0 && (t - s.lastActive) > IDLE_TTL_MS) s.destroy();
   }
 }, 1000 * 60 * 30).unref?.();
+
+// Memory guard — each chat keeps a live `claude` process (~150-350MB). On a 4-core
+// Pi that piles up fast and pushes the box into SD-card swap thrashing (load spikes
+// with no CPU). So hibernate any chat that's idle, unwatched, and not mid-turn: kill
+// the proc, keep the transcript — it resumes with full context on the next message.
+// Also enforce a hard cap, evicting the least-recently-active idle chats when over it.
+setInterval(() => {
+  const t = now();
+  const candidates = [];   // idle + unwatched + not busy → eligible to hibernate
+  let liveCount = 0;
+  for (const s of sessions.values()) {
+    if (!s.proc) continue;
+    liveCount++;
+    if (!s.busy && s.clients.size === 0) candidates.push(s);
+  }
+  // 1) age-based: hibernate anything idle longer than the TTL.
+  for (const s of candidates) {
+    if ((t - s.lastActive) > IDLE_PROC_MS && s.hibernate()) liveCount--;
+  }
+  // 2) cap-based: if still over the cap, hibernate the longest-idle survivors.
+  if (liveCount > MAX_LIVE_PROCS) {
+    const survivors = candidates.filter(s => s.proc).sort((a, b) => a.lastActive - b.lastActive);
+    for (const s of survivors) {
+      if (liveCount <= MAX_LIVE_PROCS) break;
+      if (s.hibernate()) liveCount--;
+    }
+  }
+}, 1000 * 60 * 2).unref?.();
 
 // Health watchdog — a chat stuck "thinking" with no output for a long stretch is
 // probably wedged (Claude/Pi hiccup). Alert once per turn; do NOT kill, since a
