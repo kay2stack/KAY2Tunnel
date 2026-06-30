@@ -4,6 +4,23 @@ Use this when **kay2 is offline** over Tailscale and you have **local access** (
 
 Goal: get the Pi stable on plain local/LAN networking first, find what is causing reboots, then re-enable Tailscale only after it is healthy.
 
+## Three ways to recover
+
+| Method | When to use |
+|--------|-------------|
+| **`./scripts/pi-recovery`** | SSH/keyboard on the Pi — unified CLI with status, watch, isolate |
+| **Stan CLI app → Health** | Pi is reachable (LAN or tailnet) — live score, metrics, one-tap VPN off/on |
+| **`/api/health`** | Automation or scripts when the server is running |
+
+```bash
+cd ~/KAY2Tunnel
+npm run pi:recovery          # status dashboard
+npm run pi:recovery isolate   # diagnose → vpn-off → reboot prompt
+npm run pi:recovery watch      # live terminal monitor
+```
+
+On iPhone: open Stan CLI → **Home → Health** (or Quick Action). Shows health score, power/temp/RAM, reboot history, and recovery buttons.
+
 ---
 
 ## Before you start
@@ -348,6 +365,28 @@ last reboot | head -10
 
 | File | Purpose |
 |------|---------|
+| `scripts/pi-recovery` | Unified CLI — status, watch, isolate, vpn-on/off |
 | `scripts/pi-diagnose-reboots.sh` | Read-only reboot / power / OOM / Tailscale report |
 | `scripts/pi-remove-tailscale.sh` | Stop Tailscale and clear serve proxy |
+| `server/health.js` | Health API + scoring + recovery actions |
+| `public/health.js` | Mobile Health panel in Stan CLI |
 | `CLAUDE.md` | Normal deploy path (assumes Tailscale healthy) |
+
+## Health API (when server is running)
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/health` | Full snapshot + score + issues |
+| `GET /api/health/summary` | Lightweight dashboard payload |
+| `POST /api/health/snapshot` | Save shell diagnostic to `~/pi-diagnostics/` |
+| `POST /api/health/actions/tailscale-disable` | Body: `{"confirm":true}` |
+| `POST /api/health/actions/tailscale-enable` | Body: `{"confirm":true}` |
+| `POST /api/health/actions/restart-pm2` | Restart stan-cli |
+
+Tailscale enable/disable from the app requires passwordless sudo for `tailscaled` and `tailscale` on the Pi user. Add to `/etc/sudoers.d/kay2`:
+
+```
+kay2 ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable tailscaled, /usr/bin/systemctl start tailscaled, /usr/bin/tailscale, /bin/systemctl
+```
+
+Or run VPN changes via SSH: `npm run pi:vpn-off` / `npm run pi:recovery vpn-on`.
