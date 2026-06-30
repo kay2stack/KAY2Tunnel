@@ -1,5 +1,44 @@
 # Scaleway bootstrap (KeyStudios / stan-vps)
 
+## Can't set up from iPhone? **Skip it for now.**
+
+You do **not** need Scaleway to use Stan CLI when the Pi is back. VPS is optional backup.
+
+| Priority | What to do |
+|----------|------------|
+| **Now (no Pi, no laptop)** | Wait — nothing critical blocked |
+| **Pi returns** | Fix Pi → `npm run pi:recovery` → optional VPS in 5 min from Cursor |
+| **Need GPU now** | vast.ai from Pi when it's up (`npm run gpu:up`) |
+
+---
+
+## Zero-iPhone-SSH path (when Pi or laptop is back)
+
+Only copy **two things** from Safari on iPhone (no Termius, no SSH keys):
+
+1. **Scaleway Project ID** — KeyStudios → Project settings → UUID  
+2. **Tailscale auth key** — https://login.tailscale.com/admin/settings/keys → Generate reusable key  
+
+Add to `~/KAY2Tunnel/.env`:
+
+```bash
+SCW_SECRET_KEY=your-new-api-secret
+SCW_PROJECT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+TAILSCALE_AUTHKEY=tskey-auth-xxxxxxxx
+AUTH_TOKEN=your-stan-token
+```
+
+One command (on Pi or laptop):
+
+```bash
+cd ~/KAY2Tunnel
+./scripts/scaleway-provision-all.sh
+```
+
+That creates the VPS, installs Tailscale + Stan CLI, and exposes HTTPS — **you only open Safari on iPhone** after ~5 minutes.
+
+---
+
 ## ⚠️ Security first
 
 You posted your API **secret** in chat. After setup:
