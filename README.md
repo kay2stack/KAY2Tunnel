@@ -232,6 +232,21 @@ See:
 
 ---
 
+## Pi offline? VPN & reboot recovery
+
+If **kay2 is unreachable over Tailscale** or keeps rebooting, use the recovery runbook and scripts (run on the Pi with keyboard, monitor, or LAN SSH):
+
+```bash
+cd ~/KAY2Tunnel
+chmod +x scripts/*.sh
+./scripts/pi-diagnose-reboots.sh    # capture reboot/power/OOM evidence
+./scripts/pi-remove-tailscale.sh    # stop VPN + clear serve proxy
+```
+
+Full walkthrough: [docs/pi-recovery.md](docs/pi-recovery.md)
+
+---
+
 ## Philosophy
 
 Stan CLI is not a generic AI chat app.
