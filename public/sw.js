@@ -1,10 +1,11 @@
-const CACHE_VERSION = 'stan-cli-v7';
+const CACHE_VERSION = 'stan-cli-v8';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
   '/styles.css',
   '/app.js',
   '/health.js',
+  '/gpu.js',
   '/term.js',
   '/projects.js',
   '/agents.js',

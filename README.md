@@ -266,6 +266,20 @@ Guide: [docs/vps-failover.md](docs/vps-failover.md) — includes Cursor agent pr
 
 ---
 
+## GPU burst (vast.ai)
+
+Spin up a cloud GPU from your phone when you need fast local Ollama or OpenClaw:
+
+```bash
+# .env: VAST_API_KEY=... and TAILSCALE_AUTHKEY=...
+npm run gpu:up      # launch cheapest 16GB+ GPU
+npm run gpu:down    # destroy — stop billing
+```
+
+iPhone: **Home → GPU**. Full guide: [docs/vast-gpu.md](docs/vast-gpu.md)
+
+---
+
 ## Philosophy
 
 Stan CLI is not a generic AI chat app.

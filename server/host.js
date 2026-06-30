@@ -16,6 +16,7 @@ router.get('/', (req, res) => {
       ollama: role === 'pi',
       agents: true,
       openclaw: role === 'vps' || process.env.OPENCLAW_ENABLED === '1',
+      vastGpu: !!process.env.VAST_API_KEY,
     },
   });
 });

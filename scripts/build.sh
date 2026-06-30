@@ -24,6 +24,7 @@ required=(
   public/index.html
   public/app.js
   public/health.js
+  public/gpu.js
   public/term.js
   public/styles.css
   public/sw.js

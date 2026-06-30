@@ -107,6 +107,13 @@
               <div class="quick-action-label">Health</div>
               <div class="quick-action-sub">Pi diagnostics</div>
             </button>
+            <button class="quick-action-btn" id="qa-gpu">
+              <div class="quick-action-icon" style="background:var(--openclaw-bg)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--openclaw-fg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              </div>
+              <div class="quick-action-label">GPU</div>
+              <div class="quick-action-sub" id="home-gpu-status">vast.ai</div>
+            </button>
             <button class="quick-action-btn" id="qa-settings">
               <div class="quick-action-icon" style="background:var(--bg-secondary)">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -168,6 +175,15 @@
             </div>
             <div class="settings-row" id="settings-logout-row">
               <span class="settings-row-label" style="color:var(--red)">Sign Out</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">GPU (vast.ai)</div>
+          <div class="settings-group">
+            <div class="settings-row" id="settings-gpu-row">
+              <span class="settings-row-label">Cloud GPU</span>
+              <span class="settings-row-value">Open →</span>
             </div>
           </div>
         </div>
@@ -254,6 +270,31 @@
   </nav>
 </div>
 
+<!-- ── GPU sheet ────────────────────────────────────── -->
+<div id="gpu-sheet-backdrop" class="hidden sheet-backdrop">
+  <div class="sheet-panel health-sheet">
+    <div class="sheet-header">
+      <div>
+        <div class="sheet-title">Cloud GPU</div>
+        <div class="sheet-subtitle">vast.ai burst · Ollama + Tailscale</div>
+      </div>
+      <button class="top-bar-action" id="gpu-refresh-btn">Refresh</button>
+      <button class="top-bar-action" id="gpu-close-btn">Done</button>
+    </div>
+    <div class="health-scroll">
+      <p class="settings-hint" id="gpu-config-note" style="padding-top:0">Loading…</p>
+      <div class="section-label">Active instance</div>
+      <div id="gpu-instance"></div>
+      <div class="health-actions">
+        <button class="health-action-btn primary" id="gpu-action-best">Launch best offer</button>
+        <button class="health-action-btn warn hidden" id="gpu-action-destroy">Destroy GPU (stop billing)</button>
+      </div>
+      <div class="section-label">Available offers</div>
+      <div id="gpu-offers"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Health sheet ─────────────────────────────────── -->
 <div id="health-sheet-backdrop" class="hidden sheet-backdrop">
   <div class="sheet-panel health-sheet">
@@ -311,6 +352,7 @@
 <script src="vendor/addon-web-links.js"></script>
 <script src="app.js"></script>
 <script src="health.js"></script>
+<script src="gpu.js"></script>
 <script src="term.js"></script>
 <script src="projects.js"></script>
 <script src="agents.js"></script>

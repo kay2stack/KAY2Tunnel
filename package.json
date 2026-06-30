@@ -11,7 +11,12 @@
     "pi:diagnose": "bash scripts/pi-diagnose-reboots.sh",
     "pi:vpn-off": "bash scripts/pi-remove-tailscale.sh",
     "vps:setup": "bash scripts/vps-setup.sh",
-    "vps:sync": "bash scripts/pi-push-to-vps.sh"
+    "vps:sync": "bash scripts/pi-push-to-vps.sh",
+    "gpu:status": "bash scripts/vast-gpu status",
+    "gpu:offers": "bash scripts/vast-gpu offers",
+    "gpu:up": "bash scripts/vast-gpu up",
+    "gpu:down": "bash scripts/vast-gpu down",
+    "gpu:watch": "bash scripts/vast-gpu watch"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

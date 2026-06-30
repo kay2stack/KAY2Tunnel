@@ -201,6 +201,7 @@ const App = (() => {
     document.getElementById('qa-settings')?.addEventListener('click', () => showTab('settings'));
 
     if (window.Health) Health.init();
+    if (window.Gpu) Gpu.init();
 
     const saved = localStorage.getItem('stan_token');
     if (saved) {

@@ -700,3 +700,34 @@ html, body {
 .health-proc-row { display: flex; gap: var(--sp-2); }
 .health-proc-mem { color: var(--accent); flex-shrink: 0; width: 36px; }
 .health-proc-cmd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── GPU panel ─────────────────────────────────────── */
+.gpu-active-card {
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--r-lg); padding: var(--sp-4); margin-bottom: var(--sp-3);
+}
+.gpu-active-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.gpu-active-label { font-weight: 600; font-size: 15px; }
+.gpu-status-pill {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  padding: 3px 8px; border-radius: var(--r-pill);
+}
+.gpu-status-pill.on { background: var(--green-bg); color: var(--green); }
+.gpu-status-pill.boot { background: var(--amber-bg); color: var(--amber); }
+.gpu-active-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2);
+}
+.gpu-hint {
+  font-size: 12px; color: var(--text-dim); margin-top: var(--sp-3); line-height: 1.45;
+}
+.gpu-hint code { font-family: var(--font-mono); font-size: 11px; }
+.gpu-offer-row {
+  display: flex; align-items: center; gap: var(--sp-2);
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--r-md); padding: var(--sp-3); margin-bottom: var(--sp-2);
+}
+.gpu-offer-main { flex: 1; min-width: 0; }
+.gpu-offer-name { font-size: 14px; font-weight: 600; }
+.gpu-offer-meta { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.gpu-offer-right { text-align: right; flex-shrink: 0; }
+.gpu-offer-price { font-family: var(--font-mono); font-size: 13px; font-weight: 600; color: var(--openclaw-fg); margin-bottom: 4px; }
