@@ -9,7 +9,9 @@
     "start": "pm2 start ecosystem.config.js",
     "pi:recovery": "bash scripts/pi-recovery",
     "pi:diagnose": "bash scripts/pi-diagnose-reboots.sh",
-    "pi:vpn-off": "bash scripts/pi-remove-tailscale.sh"
+    "pi:vpn-off": "bash scripts/pi-remove-tailscale.sh",
+    "vps:setup": "bash scripts/vps-setup.sh",
+    "vps:sync": "bash scripts/pi-push-to-vps.sh"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",

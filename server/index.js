@@ -10,6 +10,7 @@ const aiRouter = require('./ai');
 const agentsRouter = require('./agents');
 const projectsRouter = require('./projects');
 const healthRouter = require('./health');
+const hostRouter = require('./host');
 
 const app = express();
 const server = http.createServer(app);
@@ -22,6 +23,7 @@ app.use('/api/ai', aiRouter);
 app.use('/api/agents', agentsRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/health', healthRouter);
+app.use('/api/host', hostRouter);
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));

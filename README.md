@@ -248,6 +248,24 @@ Full walkthrough: [docs/pi-recovery.md](docs/pi-recovery.md)
 
 ---
 
+## VPS fallback (Pi down → keep coding)
+
+Run Claude Code, Codex, and OpenClaw on a **VPS** when kay2 is offline. Same Stan CLI, same token, auto-failover on iPhone.
+
+```bash
+# On VPS (once):
+sudo bash scripts/vps-setup.sh
+
+# On Pi (sync repos when healthy):
+./scripts/pi-push-to-vps.sh kay2@stan-vps
+```
+
+iPhone: **Settings → Fallback host** → `https://stan-vps.<tailnet>.ts.net`
+
+Guide: [docs/vps-failover.md](docs/vps-failover.md) — includes Cursor agent prompt for setup from the Pi.
+
+---
+
 ## Philosophy
 
 Stan CLI is not a generic AI chat app.
