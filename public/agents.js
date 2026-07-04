@@ -43,8 +43,8 @@ const Agents = (() => {
 
     // Running agents first
     const running = agents.filter(a => a.session);
-    const ready   = agents.filter(a => !a.session && a.installed && a.cmd);
-    const other   = agents.filter(a => !a.session && (!a.installed || !a.cmd));
+    const ready   = agents.filter(a => !a.session && a.installed);
+    const other   = agents.filter(a => !a.session && !a.installed);
 
     if (running.length) {
       container.appendChild(sectionLabel('Running'));
@@ -55,7 +55,7 @@ const Agents = (() => {
       ready.forEach(a => container.appendChild(makeCard(a)));
     }
     if (other.length) {
-      container.appendChild(sectionLabel('Offline / Not installed'));
+      container.appendChild(sectionLabel('Offline'));
       other.forEach(a => container.appendChild(makeCard(a)));
     }
   }
@@ -77,7 +77,7 @@ const Agents = (() => {
     card.setAttribute('data-agent-id', agent.id);
 
     const statusClass = isRunning ? 'running' : (agent.installed ? 'ready' : 'offline');
-    const statusText  = isRunning ? 'Running' : (agent.installed ? 'Ready' : 'Not installed');
+    const statusText  = isRunning ? 'Running' : (agent.installed ? 'Ready' : (agent.offlineReason || 'Offline'));
     const statusDot   = isRunning ? `<span class="status-dot connected"></span>` : `<span class="status-dot ${agent.installed ? 'reconnecting' : 'offline'}"></span>`;
 
     card.innerHTML = `
@@ -96,9 +96,19 @@ const Agents = (() => {
 
     if (isStanChat) {
       const chatBtn = document.createElement('button');
-      chatBtn.className = 'agent-btn primary'; chatBtn.textContent = 'Chat';
-      chatBtn.addEventListener('click', () => openStanChat());
+      chatBtn.className = 'agent-btn primary';
+      chatBtn.textContent = agent.installed ? 'Chat' : 'Offline';
+      chatBtn.disabled = !agent.installed;
+      chatBtn.addEventListener('click', () => {
+        if (agent.installed) openStanChat();
+      });
       actions.appendChild(chatBtn);
+      if (!agent.installed) {
+        const hint = document.createElement('span');
+        hint.style.cssText = 'font-size:12px;color:var(--color-text-dim);padding:0 0 4px';
+        hint.textContent = agent.offlineReason || 'Ollama offline on kay2';
+        actions.appendChild(hint);
+      }
     } else if (isRunning) {
       const viewBtn = document.createElement('button');
       viewBtn.className = 'agent-btn primary'; viewBtn.textContent = '→ Terminal';
@@ -292,12 +302,16 @@ const Agents = (() => {
   let _models = [], _activeModel = null, _chatMessages = [], _chatStreaming = false;
 
   async function loadModels() {
+    const bar = document.getElementById('stan-model-bar');
     try {
       const r = await App.apiFetch('/api/ai/models');
       const data = await r.json();
       _models = (data.models || []).map(m => m.name || m);
-      const bar = document.getElementById('stan-model-bar');
       if (!bar) return;
+      if (!_models.length) {
+        bar.innerHTML = '<span style="font-size:13px;color:var(--red)">No Ollama models loaded</span>';
+        return;
+      }
       const saved = localStorage.getItem('stan_ai_model');
       _activeModel = (_models.includes(saved) ? saved : null) || _models[0] || null;
       bar.innerHTML = _models.map(m => `
@@ -308,7 +322,9 @@ const Agents = (() => {
         localStorage.setItem('stan_ai_model', _activeModel);
         bar.querySelectorAll('.model-chip').forEach(b => b.classList.toggle('active', b.dataset.model === _activeModel));
       }));
-    } catch {}
+    } catch {
+      if (bar) bar.innerHTML = '<span style="font-size:13px;color:var(--red)">Stan Chat offline — Ollama unreachable</span>';
+    }
   }
 
   function restoreHistory() {
@@ -323,7 +339,11 @@ const Agents = (() => {
     if (_chatStreaming) return;
     const input = document.getElementById('stan-chat-input');
     const text = input?.value.trim();
-    if (!text || !_activeModel) return;
+    if (!text || !_activeModel) {
+      if (!text) return;
+      alert('Stan Chat is offline — start Ollama on kay2');
+      return;
+    }
     input.value = '';
     _chatMessages.push({ role: 'user', content: text });
     appendBubble('user', text);
