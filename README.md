@@ -232,6 +232,54 @@ See:
 
 ---
 
+## Pi offline? VPN & reboot recovery
+
+If **kay2 is unreachable over Tailscale** or keeps rebooting:
+
+```bash
+cd ~/KAY2Tunnel
+npm run pi:recovery          # terminal health dashboard
+npm run pi:recovery isolate  # full isolation workflow
+```
+
+When the Pi is reachable on the tailnet or LAN, open Stan CLI → **Health** for live metrics, reboot history, and one-tap VPN isolation.
+
+Full walkthrough: [docs/pi-recovery.md](docs/pi-recovery.md)
+
+---
+
+## VPS fallback (Pi down → keep coding)
+
+Run Claude Code, Codex, and OpenClaw on a **VPS** when kay2 is offline. Same Stan CLI, same token, auto-failover on iPhone.
+
+```bash
+# On VPS (once):
+sudo bash scripts/vps-setup.sh
+
+# On Pi (sync repos when healthy):
+./scripts/pi-push-to-vps.sh kay2@stan-vps
+```
+
+iPhone: **Settings → Fallback host** → `https://stan-vps.<tailnet>.ts.net`
+
+Guide: [docs/vps-failover.md](docs/vps-failover.md) — includes Cursor agent prompt for setup from the Pi.
+
+---
+
+## GPU burst (vast.ai)
+
+Spin up a cloud GPU from your phone when you need fast local Ollama or OpenClaw:
+
+```bash
+# .env: VAST_API_KEY=... and TAILSCALE_AUTHKEY=...
+npm run gpu:up      # launch cheapest 16GB+ GPU
+npm run gpu:down    # destroy — stop billing
+```
+
+iPhone: **Home → GPU**. Full guide: [docs/vast-gpu.md](docs/vast-gpu.md)
+
+---
+
 ## Philosophy
 
 Stan CLI is not a generic AI chat app.

@@ -50,19 +50,31 @@
       <div class="home-scroll">
         <div class="home-header">
           <div class="home-greeting" id="home-greeting">Good morning, Kane</div>
-          <div class="home-subgreeting">kay2 is online</div>
+          <div class="home-subgreeting" id="home-subgreeting">kay2 is online</div>
         </div>
         <div class="home-body">
           <div class="home-stats-grid">
+            <div class="stat-card health-card-tap" id="home-health-card">
+              <div class="stat-label">Health</div>
+              <div class="stat-value" id="home-health-score">—</div>
+              <div class="stat-sub" id="home-health-grade">Tap for details</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Status</div>
+              <div class="stat-value" id="home-status-value" style="font-size:20px;line-height:1.6">—</div>
+              <div class="stat-sub" id="home-status-sub">Loading…</div>
+            </div>
             <div class="stat-card">
               <div class="stat-label">Sessions</div>
               <div class="stat-value" id="home-session-count">—</div>
               <div class="stat-sub">Active terminals</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Status</div>
-              <div class="stat-value" style="color:var(--green);font-size:20px;line-height:1.6">Online</div>
-              <div class="stat-sub">Tailscale connected</div>
+              <div class="stat-label">System</div>
+              <div class="stat-value" style="font-size:18px;line-height:1.5">
+                <span id="home-temp">—</span>
+              </div>
+              <div class="stat-sub"><span id="home-uptime">—</span> · RAM <span id="home-mem">—</span></div>
             </div>
           </div>
           <div class="section-label">Quick Actions</div>
@@ -87,6 +99,20 @@
               </div>
               <div class="quick-action-label">Agents</div>
               <div class="quick-action-sub">Launch AI</div>
+            </button>
+            <button class="quick-action-btn" id="qa-health">
+              <div class="quick-action-icon" style="background:var(--green-bg)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              </div>
+              <div class="quick-action-label">Health</div>
+              <div class="quick-action-sub">Pi diagnostics</div>
+            </button>
+            <button class="quick-action-btn" id="qa-gpu">
+              <div class="quick-action-icon" style="background:var(--openclaw-bg)">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--openclaw-fg)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+              </div>
+              <div class="quick-action-label">GPU</div>
+              <div class="quick-action-sub" id="home-gpu-status">vast.ai</div>
             </button>
             <button class="quick-action-btn" id="qa-settings">
               <div class="quick-action-icon" style="background:var(--bg-secondary)">
@@ -153,6 +179,38 @@
           </div>
         </div>
         <div class="settings-section">
+          <div class="settings-section-title">GPU (vast.ai)</div>
+          <div class="settings-group">
+            <div class="settings-row" id="settings-gpu-row">
+              <span class="settings-row-label">Cloud GPU</span>
+              <span class="settings-row-value">Open →</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Failover (VPS)</div>
+          <div class="settings-group">
+            <div class="settings-row" id="settings-failover-row">
+              <span class="settings-row-label">Fallback host</span>
+              <span class="settings-row-value" id="settings-failover-preview">Not set</span>
+            </div>
+            <div class="settings-row" id="settings-host-role-row">
+              <span class="settings-row-label">This host</span>
+              <span class="settings-row-value" id="settings-host-role">—</span>
+            </div>
+          </div>
+          <p class="settings-hint">When kay2 Pi is down, Stan CLI switches to your VPS automatically.</p>
+        </div>
+        <div class="settings-section">
+          <div class="settings-section-title">Pi Recovery</div>
+          <div class="settings-group">
+            <div class="settings-row" id="settings-health-row">
+              <span class="settings-row-label">System Health</span>
+              <span class="settings-row-value">Open →</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-section">
           <div class="settings-section-title">About</div>
           <div class="settings-group">
             <div class="settings-row">
@@ -212,21 +270,80 @@
   </nav>
 </div>
 
+<!-- ── GPU sheet ────────────────────────────────────── -->
+<div id="gpu-sheet-backdrop" class="hidden sheet-backdrop">
+  <div class="sheet-panel health-sheet">
+    <div class="sheet-header">
+      <div>
+        <div class="sheet-title">Cloud GPU</div>
+        <div class="sheet-subtitle">vast.ai burst · Ollama + Tailscale</div>
+      </div>
+      <button class="top-bar-action" id="gpu-refresh-btn">Refresh</button>
+      <button class="top-bar-action" id="gpu-close-btn">Done</button>
+    </div>
+    <div class="health-scroll">
+      <p class="settings-hint" id="gpu-config-note" style="padding-top:0">Loading…</p>
+      <div class="section-label">Active instance</div>
+      <div id="gpu-instance"></div>
+      <div class="health-actions">
+        <button class="health-action-btn primary" id="gpu-action-best">Launch best offer</button>
+        <button class="health-action-btn warn hidden" id="gpu-action-destroy">Destroy GPU (stop billing)</button>
+      </div>
+      <div class="section-label">Available offers</div>
+      <div id="gpu-offers"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Health sheet ─────────────────────────────────── -->
+<div id="health-sheet-backdrop" class="hidden sheet-backdrop">
+  <div class="sheet-panel health-sheet">
+    <div class="sheet-header">
+      <div>
+        <div class="sheet-title">System Health</div>
+        <div class="sheet-subtitle">kay2 Pi diagnostics & recovery</div>
+      </div>
+      <button class="top-bar-action" id="health-refresh-btn">Refresh</button>
+      <button class="top-bar-action" id="health-close-btn">Done</button>
+    </div>
+    <div class="health-scroll" id="health-scroll">
+      <div id="health-loading" class="health-loading hidden">Scanning…</div>
+      <div class="health-score-wrap">
+        <div class="health-score-ring" id="health-score-ring">
+          <div class="health-score-inner">
+            <span class="health-score-num" id="health-score-num">—</span>
+            <span class="health-score-of">/100</span>
+          </div>
+        </div>
+        <div class="health-grade-label" id="health-grade-label">—</div>
+      </div>
+      <div class="section-label">Metrics</div>
+      <div class="health-metrics" id="health-metrics"></div>
+      <div class="section-label">Issues</div>
+      <div id="health-issues"></div>
+      <div class="section-label">Recovery</div>
+      <div class="health-actions">
+        <button class="health-action-btn" id="health-action-diagnose">Save diagnostic snapshot</button>
+        <button class="health-action-btn warn" id="health-action-ts-disable">Stop Tailscale (isolate VPN)</button>
+        <button class="health-action-btn primary hidden" id="health-action-ts-enable">Re-enable Tailscale</button>
+        <button class="health-action-btn" id="health-action-restart">Restart Stan CLI</button>
+      </div>
+      <div class="section-label">Reboot history</div>
+      <div class="health-reboots" id="health-reboots"></div>
+      <div class="section-label">Top memory</div>
+      <div class="health-processes" id="health-processes"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Sessions sheet ───────────────────────────────── -->
-<div id="sessions-sheet" class="hidden" style="
-  position:fixed;inset:0;z-index:50;background:rgba(28,21,54,0.3);backdrop-filter:blur(4px);
-  display:flex;align-items:flex-end;justify-content:center;
-">
-  <div style="
-    background:var(--bg-card);border-radius:var(--r-xl) var(--r-xl) 0 0;
-    border:1px solid var(--border);width:100%;max-width:600px;
-    padding:var(--sp-6);max-height:70vh;overflow-y:auto;
-  ">
-    <div style="display:flex;align-items:center;margin-bottom:var(--sp-4)">
-      <span style="font-size:16px;font-weight:600;flex:1;color:var(--text-primary)">Terminal Sessions</span>
+<div id="sessions-sheet" class="hidden sheet-backdrop">
+  <div class="sheet-panel">
+    <div class="sheet-header">
+      <span class="sheet-title">Terminal Sessions</span>
       <button class="top-bar-action" id="sessions-close-btn">Done</button>
     </div>
-    <div id="sessions-list-content"></div>
+    <div id="sessions-list-content" style="padding:var(--sp-4);overflow-y:auto;max-height:60vh"></div>
   </div>
 </div>
 
@@ -234,6 +351,8 @@
 <script src="vendor/addon-fit.js"></script>
 <script src="vendor/addon-web-links.js"></script>
 <script src="app.js"></script>
+<script src="health.js"></script>
+<script src="gpu.js"></script>
 <script src="term.js"></script>
 <script src="projects.js"></script>
 <script src="agents.js"></script>

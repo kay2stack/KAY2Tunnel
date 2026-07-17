@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Stan CLI — vast.ai GPU control
+# Usage: ./scripts/vast-gpu [command]
+#
+# Commands:
+#   status     Current instance + billing
+#   offers     List matching GPU offers
+#   up         Launch cheapest matching GPU
+#   up ID      Launch specific offer
+#   down       Destroy tracked instance
+#   watch      Poll status every 10s
+#   help
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
+API="http://127.0.0.1:${PORT:-7420}"
+TOKEN="${AUTH_TOKEN:-}"
+
+cmd="${1:-status}"
+
+auth_hdr() {
+  if [[ -z "$TOKEN" ]]; then
+    echo "AUTH_TOKEN required in .env" >&2
+    exit 1
+  fi
+  echo "Authorization: Bearer $TOKEN"
+}
+
+api_get() {
+  curl -sf -H "$(auth_hdr)" "$API$1"
+}
+
+api_post() {
+  curl -sf -X POST -H "$(auth_hdr)" -H "Content-Type: application/json" -d "$2" "$API$1"
+}
+
+banner() {
+  echo "═══════════════════════════════════════"
+  echo " Stan GPU · vast.ai"
+  echo "═══════════════════════════════════════"
+}
+
+case "$cmd" in
+  help|-h|--help)
+    banner
+    echo "Commands: status | offers | up [offer_id] | down | watch"
+    exit 0
+    ;;
+  status)
+    banner
+    api_get /api/gpu/config | python3 -m json.tool 2>/dev/null || api_get /api/gpu/config
+    echo ""
+    api_get /api/gpu/status | python3 -m json.tool 2>/dev/null || api_get /api/gpu/status
+    ;;
+  offers)
+    banner
+    api_get "/api/gpu/offers?limit=${2:-10}" | python3 -m json.tool 2>/dev/null || api_get "/api/gpu/offers?limit=${2:-10}"
+    ;;
+  up)
+    banner
+    body='{"confirm":true}'
+    if [[ -n "${2:-}" ]]; then
+      body="{\"confirm\":true,\"offerId\":$2}"
+    fi
+    api_post /api/gpu/launch "$body" | python3 -m json.tool 2>/dev/null || api_post /api/gpu/launch "$body"
+    echo ""
+    echo "Poll: $0 status"
+    ;;
+  down)
+    banner
+    api_post /api/gpu/destroy '{"confirm":true}' | python3 -m json.tool 2>/dev/null || api_post /api/gpu/destroy '{"confirm":true}'
+    ;;
+  watch)
+    while true; do
+      clear
+      banner
+      api_get /api/gpu/status 2>/dev/null | python3 -m json.tool 2>/dev/null || api_get /api/gpu/status 2>/dev/null || echo "Server unreachable"
+      echo ""
+      echo "Ctrl+C to stop"
+      sleep 10
+    done
+    ;;
+  *)
+    echo "Unknown: $cmd (try: help)" >&2
+    exit 1
+    ;;
+esac

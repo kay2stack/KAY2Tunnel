@@ -9,6 +9,9 @@ const filesRouter = require('./files');
 const aiRouter = require('./ai');
 const agentsRouter = require('./agents');
 const projectsRouter = require('./projects');
+const healthRouter = require('./health');
+const hostRouter = require('./host');
+const gpuRouter = require('./vast');
 
 const app = express();
 const server = http.createServer(app);
@@ -20,6 +23,9 @@ app.use('/api/files', filesRouter);
 app.use('/api/ai', aiRouter);
 app.use('/api/agents', agentsRouter);
 app.use('/api/projects', projectsRouter);
+app.use('/api/health', healthRouter);
+app.use('/api/host', hostRouter);
+app.use('/api/gpu', gpuRouter);
 app.get('/api/term/sessions', (req, res) => res.json(listSessions()));
 
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));

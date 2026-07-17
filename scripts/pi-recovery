@@ -1,0 +1,201 @@
+#!/usr/bin/env bash
+# kay2 Pi Recovery — unified CLI
+# Usage: ./scripts/pi-recovery [command]
+#
+# Commands:
+#   status      Live health summary (default)
+#   watch       Refresh status every 5s
+#   diagnose    Save full diagnostic report
+#   vpn-off     Stop Tailscale (isolate VPN)
+#   vpn-on      Re-enable Tailscale + serve
+#   isolate     Full isolation workflow (diagnose → vpn-off → reboot prompt)
+#   json        Machine-readable health (needs stan-cli running)
+#   help        Show commands
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+RED='\033[0;31m'
+GRN='\033[0;32m'
+YLW='\033[1;33m'
+BLU='\033[0;34m'
+CYN='\033[0;36m'
+DIM='\033[2m'
+BOLD='\033[1m'
+RST='\033[0m'
+
+cmd="${1:-status}"
+
+banner() {
+  echo -e "${BOLD}${CYN}"
+  echo "  ┌─────────────────────────────────────┐"
+  echo "  │  kay2 Pi Recovery                   │"
+  echo "  │  VPN isolation · reboot diagnosis   │"
+  echo "  └─────────────────────────────────────┘"
+  echo -e "${RST}"
+}
+
+score_color() {
+  local s="$1"
+  if (( s >= 85 )); then echo "$GRN"
+  elif (( s >= 60 )); then echo "$YLW"
+  else echo "$RED"
+  fi
+}
+
+print_local_status() {
+  local throttled temp mem_pct uptime_human ts_active
+
+  throttled="$(vcgencmd get_throttled 2>/dev/null || echo 'n/a')"
+  temp="$(vcgencmd measure_temp 2>/dev/null | grep -o '[0-9.]*' || echo '?')"
+  mem_pct="$(awk '/MemTotal/{t=$2} /MemAvailable/{a=$2} END{printf "%d", (t-a)*100/t}' /proc/meminfo 2>/dev/null || echo '?')"
+  uptime_human="$(uptime -p 2>/dev/null || uptime | sed 's/.*up/up/')"
+  ts_active="$(systemctl is-active tailscaled 2>/dev/null || echo unknown)"
+
+  echo -e "${BOLD}System${RST}"
+  echo -e "  Uptime:     ${uptime_human}"
+  echo -e "  CPU temp:   ${temp}°C"
+  echo -e "  Memory:     ${mem_pct}% used"
+  echo -e "  Throttled:  ${throttled}"
+  echo ""
+  echo -e "${BOLD}Network${RST}"
+  echo -e "  Tailscale:  ${ts_active}"
+  if command -v tailscale >/dev/null 2>&1; then
+    echo -e "  TS IP:      $(tailscale ip -4 2>/dev/null || echo '—')"
+  fi
+  echo -e "  LAN:        $(hostname -I 2>/dev/null | awk '{print $1}' || echo '—')"
+  if ping -c 1 -W 2 8.8.8.8 >/dev/null 2>&1; then
+    echo -e "  Internet:   ${GRN}OK${RST}"
+  else
+    echo -e "  Internet:   ${RED}FAIL${RST}"
+  fi
+  echo ""
+  echo -e "${BOLD}Stan CLI${RST}"
+  if command -v pm2 >/dev/null 2>&1; then
+    pm2 jlist 2>/dev/null | grep -q '"name":"stan-cli".*"status":"online"' \
+      && echo -e "  PM2:        ${GRN}stan-cli online${RST}" \
+      || echo -e "  PM2:        ${RED}stan-cli down${RST}"
+  else
+    echo -e "  PM2:        ${DIM}not installed${RST}"
+  fi
+
+  if [[ "$throttled" != "throttled=0x0" && "$throttled" != "n/a" ]]; then
+    echo ""
+    echo -e "${RED}${BOLD}⚠  Power/thermal throttling detected${RST}"
+    echo -e "   Check PSU (5V/3A+) and cooling."
+  fi
+}
+
+fetch_api_json() {
+  local token="${AUTH_TOKEN:-}"
+  if [[ -z "$token" && -f "$ROOT/.env" ]]; then
+    token="$(grep -E '^AUTH_TOKEN=' "$ROOT/.env" | cut -d= -f2- | tr -d '"' | tr -d "'")"
+  fi
+  if [[ -z "$token" ]]; then return 1; fi
+  curl -sf -H "Authorization: Bearer $token" "http://127.0.0.1:7420/api/health/summary" 2>/dev/null
+}
+
+print_api_status() {
+  local json
+  json="$(fetch_api_json)" || return 1
+  local score health issues temp mem uptime ts
+
+  score="$(echo "$json" | grep -o '"score":[0-9]*' | head -1 | cut -d: -f2)"
+  health="$(echo "$json" | grep -o '"label":"[^"]*"' | head -1 | cut -d'"' -f4)"
+  issues="$(echo "$json" | grep -o '"issueCount":[0-9]*' | head -1 | cut -d: -f2)"
+  temp="$(echo "$json" | grep -o '"tempC":[0-9.]*' | head -1 | cut -d: -f2)"
+  mem="$(echo "$json" | grep -o '"memoryUsePct":[0-9]*' | head -1 | cut -d: -f2)"
+  uptime="$(echo "$json" | grep -o '"human":"[^"]*"' | head -1 | cut -d'"' -f4)"
+
+  local sc
+  sc="$(score_color "${score:-0}")"
+  echo -e "${BOLD}Health score${RST}  ${sc}${score:-?}/100${RST}  (${health:-unknown})"
+  echo -e "  Issues: ${issues:-0}  ·  Temp: ${temp:-?}°C  ·  RAM: ${mem:-?}%  ·  Up: ${uptime:-?}"
+  echo -e "${DIM}  (via Stan CLI API)${RST}"
+  echo ""
+}
+
+case "$cmd" in
+  help|-h|--help)
+    banner
+    echo "Commands:"
+    echo "  status     Health summary (API if available, else local probes)"
+    echo "  watch      Live refresh every 5 seconds"
+    echo "  diagnose   Save report to ~/pi-diagnostics/"
+    echo "  vpn-off    Stop Tailscale + reset serve"
+    echo "  vpn-on     Enable Tailscale + tailscale serve --bg 7420"
+    echo "  isolate    Diagnose → VPN off → optional reboot"
+    echo "  json       Raw /api/health JSON (server must be running)"
+    echo ""
+    exit 0
+    ;;
+
+  status)
+    banner
+    print_api_status || true
+    print_local_status
+    ;;
+
+  watch)
+    banner
+    while true; do
+      clear
+      banner
+      print_api_status || true
+      print_local_status
+      echo -e "${DIM}Refreshing in 5s — Ctrl+C to stop${RST}"
+      sleep 5
+    done
+    ;;
+
+  diagnose)
+    exec "$ROOT/scripts/pi-diagnose-reboots.sh" "${@:2}"
+    ;;
+
+  vpn-off)
+    exec "$ROOT/scripts/pi-remove-tailscale.sh" "${@:2}"
+    ;;
+
+  vpn-on)
+    echo "Enabling Tailscale..."
+    sudo systemctl enable --now tailscaled
+    sudo tailscale up
+    sudo tailscale serve --bg 7420
+    tailscale status
+    echo ""
+    echo -e "${GRN}Tailscale enabled. Stan CLI served on tailnet.${RST}"
+    ;;
+
+  isolate)
+    banner
+    echo -e "${BOLD}Step 1/3${RST}  Saving diagnostic snapshot..."
+    "$ROOT/scripts/pi-diagnose-reboots.sh"
+    echo ""
+    echo -e "${BOLD}Step 2/3${RST}  Stopping Tailscale..."
+    "$ROOT/scripts/pi-remove-tailscale.sh"
+    echo ""
+    echo -e "${BOLD}Step 3/3${RST}  Reboot recommended to verify stability without VPN."
+    read -r -p "Reboot now? [y/N] " ans
+    if [[ "${ans,,}" == "y" ]]; then
+      echo "Rebooting..."
+      sudo reboot
+    else
+      echo "Skipped reboot. Run: sudo reboot"
+      echo "After boot: $ROOT/scripts/pi-recovery status"
+    fi
+    ;;
+
+  json)
+    if fetch_api_json; then exit 0; fi
+    echo "API unavailable. Is stan-cli running? Try: pm2 status" >&2
+    exit 1
+    ;;
+
+  *)
+    echo "Unknown command: $cmd" >&2
+    echo "Run: $0 help" >&2
+    exit 1
+    ;;
+esac
