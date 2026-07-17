@@ -43,6 +43,16 @@ const AGENT_DEFS = [
     description: 'Local AI via Ollama',
     color: '#7C5CFF',
   },
+  {
+    id: 'openclaw',
+    name: 'OpenClaw',
+    provider: 'Clive',
+    cmd: 'openclaw',
+    icon: 'openclaw',
+    description: 'OpenClaw / Clive agent (VPS recommended)',
+    color: '#FF6B35',
+    vpsPreferred: true,
+  },
 ];
 
 const _installCache = {};

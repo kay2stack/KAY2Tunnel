@@ -10,6 +10,7 @@ const Agents = (() => {
     'codex':       { letter: 'X', bg: '#10A37F' },
     'gemini':      { letter: 'G', bg: '#4285F4' },
     'stan':        { letter: '◉', bg: '#7C5CFF' },
+    'openclaw':    { letter: '⛊', bg: '#FF6B35' },
   };
 
   function init() {}
