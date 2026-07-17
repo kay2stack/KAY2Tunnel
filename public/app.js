@@ -3,6 +3,7 @@
 const App = (() => {
   let _token = null;
   let _activeTab = 'home';
+  let _homePollTimer = null;
 
   function token() { return _token; }
 
@@ -34,7 +35,16 @@ const App = (() => {
     if (name === 'term' && window.Term) { Term.init(); Term.focus(); }
     if (name === 'projects' && window.Projects) Projects.activate();
     if (name === 'agents'   && window.Agents)   Agents.activate();
-    if (name === 'home')    loadHomeStats();
+    if (name === 'home') {
+      loadHomeStats();
+      if (_homePollTimer) clearInterval(_homePollTimer);
+      _homePollTimer = setInterval(() => {
+        if (_activeTab === 'home' && window.Health) Health.pollHome();
+      }, 45000);
+    } else if (_homePollTimer) {
+      clearInterval(_homePollTimer);
+      _homePollTimer = null;
+    }
     if (name === 'settings') loadSettings();
   }
 
@@ -55,6 +65,8 @@ const App = (() => {
       const countEl = document.getElementById('home-session-count');
       if (countEl) countEl.textContent = sessions.length;
     } catch {}
+
+    if (window.Health) Health.pollHome();
   }
 
   function loadSettings() {
@@ -76,11 +88,16 @@ const App = (() => {
     });
 
     document.getElementById('settings-logout-row')?.addEventListener('click', logout);
+    document.getElementById('settings-health-row')?.addEventListener('click', () => {
+      if (window.Health) Health.open();
+    });
 
     document.getElementById('qa-terminal')?.addEventListener('click', () => showTab('term'));
     document.getElementById('qa-projects')?.addEventListener('click', () => showTab('projects'));
     document.getElementById('qa-agents')?.addEventListener('click', () => showTab('agents'));
     document.getElementById('qa-settings')?.addEventListener('click', () => showTab('settings'));
+
+    if (window.Health) Health.init();
 
     const saved = localStorage.getItem('stan_token');
     if (saved) { _token = saved; launch(); }

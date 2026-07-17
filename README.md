@@ -232,6 +232,22 @@ See:
 
 ---
 
+## Pi offline? VPN & reboot recovery
+
+If **kay2 is unreachable over Tailscale** or keeps rebooting:
+
+```bash
+cd ~/KAY2Tunnel
+npm run pi:recovery          # terminal health dashboard
+npm run pi:recovery isolate  # full isolation workflow
+```
+
+When the Pi is reachable on the tailnet or LAN, open Stan CLI → **Health** for live metrics, reboot history, and one-tap VPN isolation.
+
+Full walkthrough: [docs/pi-recovery.md](docs/pi-recovery.md)
+
+---
+
 ## Philosophy
 
 Stan CLI is not a generic AI chat app.
