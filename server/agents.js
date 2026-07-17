@@ -3,6 +3,7 @@ const { execSync } = require('child_process');
 const path = require('path');
 const { ROOT_DIR } = require('./config');
 const { listSessions, getSession } = require('./terminal');
+const { ollamaStatus } = require('./health');
 
 const router = express.Router();
 
@@ -61,12 +62,17 @@ function agentSession(agentId) {
 }
 
 // GET /api/agents
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
+  const ollama = await ollamaStatus();
   const result = AGENT_DEFS.map(a => {
     const running = agentSession(a.id);
+    const installed = a.id === 'stan'
+      ? ollama.online
+      : (a.cmd ? isInstalled(a.cmd) : true);
     return {
       ...a,
-      installed: a.cmd ? isInstalled(a.cmd) : true,
+      installed,
+      offlineReason: a.id === 'stan' && !ollama.online ? 'Ollama offline' : null,
       session: running ? { id: running.id, lastActive: running.lastActive, clients: running.clients } : null,
     };
   });

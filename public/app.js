@@ -55,6 +55,43 @@ const App = (() => {
       const countEl = document.getElementById('home-session-count');
       if (countEl) countEl.textContent = sessions.length;
     } catch {}
+
+    try {
+      const r = await apiFetch('/api/health');
+      const health = await r.json();
+      setHomeStatus('online', health);
+    } catch {
+      setHomeStatus('offline');
+    }
+  }
+
+  function setHomeStatus(serverState, health) {
+    const sub = document.getElementById('home-subgreeting');
+    const serverEl = document.getElementById('home-server-status');
+    const ollamaEl = document.getElementById('home-ollama-status');
+    const ollamaSub = document.getElementById('home-ollama-sub');
+
+    if (serverState === 'offline') {
+      if (sub) sub.textContent = 'kay2 is offline';
+      if (serverEl) { serverEl.textContent = 'Offline'; serverEl.style.color = 'var(--red)'; }
+      if (ollamaEl) { ollamaEl.textContent = 'Offline'; ollamaEl.style.color = 'var(--text-dim)'; }
+      if (ollamaSub) ollamaSub.textContent = 'Cannot reach server';
+      return;
+    }
+
+    if (sub) sub.textContent = 'kay2 is online';
+    if (serverEl) { serverEl.textContent = 'Online'; serverEl.style.color = 'var(--green)'; }
+
+    const ollamaOnline = health?.ollama === 'online';
+    if (ollamaEl) {
+      ollamaEl.textContent = ollamaOnline ? 'Online' : 'Offline';
+      ollamaEl.style.color = ollamaOnline ? 'var(--green)' : 'var(--red)';
+    }
+    if (ollamaSub) {
+      ollamaSub.textContent = ollamaOnline
+        ? `${health.models || 0} model${health.models === 1 ? '' : 's'} ready`
+        : 'Start Ollama on kay2';
+    }
   }
 
   function loadSettings() {

@@ -50,7 +50,7 @@
       <div class="home-scroll">
         <div class="home-header">
           <div class="home-greeting" id="home-greeting">Good morning, Kane</div>
-          <div class="home-subgreeting">kay2 is online</div>
+          <div class="home-subgreeting" id="home-subgreeting">Checking kay2…</div>
         </div>
         <div class="home-body">
           <div class="home-stats-grid">
@@ -60,9 +60,14 @@
               <div class="stat-sub">Active terminals</div>
             </div>
             <div class="stat-card">
-              <div class="stat-label">Status</div>
-              <div class="stat-value" style="color:var(--green);font-size:20px;line-height:1.6">Online</div>
-              <div class="stat-sub">Tailscale connected</div>
+              <div class="stat-label">Stan CLI</div>
+              <div class="stat-value" id="home-server-status" style="font-size:20px;line-height:1.6">—</div>
+              <div class="stat-sub">Server reachable</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Stan Chat</div>
+              <div class="stat-value" id="home-ollama-status" style="font-size:20px;line-height:1.6">—</div>
+              <div class="stat-sub" id="home-ollama-sub">Ollama on kay2</div>
             </div>
           </div>
           <div class="section-label">Quick Actions</div>
