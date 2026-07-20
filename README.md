@@ -227,6 +227,7 @@ Running tests...
 
 See:
 
+- docs/server-commands.md — Pi reboot, PM2, Tailscale, **Cloudflare tunnel recovery**
 - docs/stan-mascot-brand-brief.md
 - docs/stan-mobile-ai-architecture-brief.md
 
